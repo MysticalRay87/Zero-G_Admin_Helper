@@ -1,0 +1,41 @@
+/* Conceptual Centralized CSS Rules */
+QLineEdit {
+    border: none;
+    background: transparent;
+    color: #00ffff;
+    font-family: "Courier New";
+}
+
+QComboBox {
+    border: none;
+    background: transparent;
+    color: #00ffff;
+}
+
+/* --------------------------------------------------
+   PUSH BUTTON INVISIBLE OVERLAY MASK
+   -------------------------------------------------- */
+
+QPushButton {
+    border: none;
+    background: transparent;
+    color: transparent;
+    font-weight: bold;
+}
+
+/* ------------------------------------------------------------------
+   DYNAMIC INPUT TARGETING & ERROR FLASH STATE HOOKS
+   ------------------------------------------------------------------ */
+
+/* Establish the base nominal state explicitly targeting your object IDs */
+#username_field, #password_field, #confirm_field {
+    border: transparent;
+}
+
+/* Inject the dynamic error property selector override */
+#username_field[error="true"], 
+#password_field[error="true"], 
+#confirm_field[error="true"] {
+    border: 2px  #ff0000;
+    background-color: rgba(255, 0, 0, 0.05);
+}

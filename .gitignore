@@ -1,0 +1,21 @@
+cat <<EOF > .gitignore
+# Exclude Python virtual environment
+.venv/
+
+# Exclude compiled bytecode
+__pycache__/
+*.py[cod]
+
+# Exclude IDE folders
+.vscode/
+
+# Exclude local runtime data
+data/
+*.json
+
+# Exclude Token Data
+git_token.txt
+
+# Exlude scratchpad
+*.scratchpad/
+EOF
