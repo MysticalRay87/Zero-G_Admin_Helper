@@ -1,0 +1,7 @@
+cat <<EOF > LICENSE
+Copyright (c) 2026 RF Technologies. All rights reserved.
+
+This software is proprietary. You are permitted to view the source code for educational purposes only. Any modification, redistribution, or use of this code—in whole or in part—in any other project or commercial product is strictly prohibited without the express written permission of Manta at RF Technologies.
+
+If you wish to use, adapt, or build upon this code, please contact Manta at RF Technologies to obtain written authorization. Proper attribution must be maintained in all authorized copies or derivative works.
+EOF
