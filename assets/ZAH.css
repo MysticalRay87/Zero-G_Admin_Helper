@@ -1,4 +1,10 @@
 /* Conceptual Centralized CSS Rules */
+
+#CentralWidgetCanvas {
+    border-image: url("assets/backgrounds/background.png") 0 0 0 0 stretch stretch;
+    background-repeat: no-repeat;
+}
+
 QLineEdit {
     border: none;
     background: transparent;
@@ -38,4 +44,73 @@ QPushButton {
 #confirm_field[error="true"] {
     border: 2px  #ff0000;
     background-color: rgba(255, 0, 0, 0.05);
+}
+
+/* ------------------------------------------------------------------
+   COCKPIT HUD CORE PANELS & GLASSMORPHISM LAYERS
+   ------------------------------------------------------------------ */
+
+/* Global container styling for the telemetry, player, and control frames */
+#TelemetryPanel, #PlayerRegistry, #ControlPanel, #DynamicDisplayA, #DynamicDisplayB {
+    background-color: rgba(15, 25, 35, 160); 
+    border: 1px solid #00d4ff; 
+    border-radius: 5px;
+}
+
+/* Data Feed terminal panels and grid spreadsheets */
+#ConsoleFrame, #ConsoleDisplay, #PlayerRegistryTable {
+    background-color: rgba(10, 15, 25, 200); 
+    color: #e0e0e0; 
+    border: 1px solid #005577;
+    font-family: "Courier New";
+}
+
+/* Specific styling to overlay over the spreadsheet table headers */
+QHeaderView::section {
+    background-color: rgba(20, 30, 45, 220);
+    color: #00d4ff;
+    border: 1px solid #005577;
+    font-weight: bold;
+}
+
+/* ------------------------------------------------------------------
+   COCKPIT INTERACTIVE WIDGET SELECTORS
+   ------------------------------------------------------------------ */
+
+/* Direct targeted overrides for Left Column dropdowns and text inputs */
+#FeedSelector, #CommandInput {
+    background-color: rgba(15, 25, 35, 220);
+    color: #00ffff;
+    border: 1px solid #00d4ff;
+    border-radius: 3px;
+    padding: 4px;
+}
+
+/* Functional grid buttons and execution controllers */
+#ExecuteButton, #MatrixButton {
+    background-color: rgba(0, 85, 119, 130);
+    color: #ffffff;
+    border: 1px solid #00d4ff;
+    border-radius: 3px;
+    font-family: "Courier New";
+    font-weight: bold;
+}
+
+#ExecuteButton:hover, #MatrixButton:hover {
+    background-color: rgba(0, 150, 200, 190);
+    border: 1px solid #ffffff;
+    color: #00ffff;
+}
+
+/* Plain text layouts nested directly inside cockpit glass frames */
+QLabel {
+    background-color: transparent;
+    border: none;
+    color: #00d4ff;
+    font-family: "Courier New";
+}
+
+#HeaderLabel {
+    font-size: 14px;
+    letter-spacing: 1px;
 }
