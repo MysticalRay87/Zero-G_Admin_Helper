@@ -1,6 +1,7 @@
 import os
 import json
 import socket # Added missing socket import for shutdown
+from PyQt6 import QtCore
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QGridLayout, QFrame, QLabel, QVBoxLayout, 
     QTextEdit, QHBoxLayout, QComboBox, QLineEdit, QPushButton, 
@@ -73,6 +74,8 @@ class MainCockpit(QMainWindow):
         # --- Telemetry Engine Initialization ---
         self.telemetry_worker = TelemetryWorker()
         self.telemetry_worker.log_received.connect(self.update_console_output)
+        
+        self.telemetry_worker.connection_status.connect(self.update_server_status, QtCore.Qt.ConnectionType.QueuedConnection)
         self.telemetry_worker.start()
         
         # Initial log confirmation for registry sync
@@ -153,7 +156,7 @@ class MainCockpit(QMainWindow):
         self.telemetry_layout.setContentsMargins(10, 10, 10, 10)
         
         self.lbl_target_ip = QLabel("Target IP: Loading...")
-        self.lbl_server_status = QLabel("Server Status: OFFLINE")
+        self.lbl_server_status = QLabel("Server Status: DETECTING....")
         self.lbl_cpu_usage = QLabel("CPU: 0%")
         self.lbl_ram_usage = QLabel("RAM: 0%")
 
@@ -266,6 +269,15 @@ class MainCockpit(QMainWindow):
         except json.JSONDecodeError:
             print("[ERROR] server_config.json is corrupted. Verification failed.")
             self.lbl_target_ip.setText("Target IP: ERROR")
+
+    def update_server_status(self, is_online):
+        """Updates the status label based on telemetry stream health."""
+        if is_online:
+            self.lbl_server_status.setText("Server Status: ONLINE")
+            self.lbl_server_status.setStyleSheet("color: #00FF00; font-weight: bold;")
+        else:
+            self.lbl_server_status.setText("Server Status: OFFLINE")
+            self.lbl_server_status.setStyleSheet("color: #FF0000; font-weight: bold;")
 
 
     def closeEvent(self, event):
