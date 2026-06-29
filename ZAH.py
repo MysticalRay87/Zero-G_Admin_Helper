@@ -59,7 +59,7 @@ def main():
     # -------------------------------------------------------------------
     # SEQUENTIAL BOOT LIFECYCLE MANAGEMENT LOOP
     # -------------------------------------------------------------------
-    
+
     # PHASE 1. Initial Environment Synchronization
     # The ApplicationLoader now internalizes the LoginWindow gate at 30%.
     if ApplicationLoader is not None:
@@ -68,13 +68,13 @@ def main():
         loader.start_boot_sequence()
         # Block until finished. Loader handles login internally.
         loader_result = loader.exec()
-        
+
         # NAVIGATION HUB: Inspect intent from the LoginWindow instance held by loader
         # (Assuming loader stores a reference to the login window or state)
         # For now, we route based on the result of the loader chain
         if loader_result == QDialog.DialogCode.Accepted:
             print("[SUCCESS] All initialization gates clear. Spinning up master core cockpit dashboard view...")
-        
+
         # If the user requested onboarding during the loader phase:
         elif hasattr(loader, 'onboarding_requested') and loader.onboarding_requested:
             if AccountOnboardingWizard is not None:
@@ -88,20 +88,20 @@ def main():
         else:
             print("[STATUS] User exited or auth failed. Shutting down.")
             sys.exit(0)
-            
+
         loader.deleteLater()
-    
-# PHASE 0: Network Check (The first gate)
+
+    # PHASE 0: Network Check (The first gate)
     from features.network.connection import is_network_ready, NetworkWizardOverlay
-    
+
     if not is_network_ready():
         print("[STATUS] Network unreachable. Launching Network Wizard...")
         network_wizard = NetworkWizardOverlay()
         if network_wizard.exec() != QDialog.DialogCode.Accepted:
-            sys.exit(0) # Exit if wizard canceled
+            sys.exit(0)  # Exit if wizard canceled
     else:
         print("[SUCCESS] Network verified.")
-    
+
     # PHASE 3: Launch Primary System Administration Dashboard Frame
     if loader.onboarding_requested and AccountOnboardingWizard:
         wizard = AccountOnboardingWizard()
@@ -110,11 +110,11 @@ def main():
         print("[STATUS] All initialization gates clear. Spinning up master core cockpit dashboard view...")
         if loader.result() == QDialog.DialogCode.Accepted:
             print("[SUCCESS] Loading sequence complete. Launching Main Cockpit.")
-            
+
             # Instantiate and show the main dashboard
             main_cockpit = MainCockpit()
             main_cockpit.show()
-            
+
             # Keep the application alive
             sys.exit(app.exec())
 

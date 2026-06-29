@@ -280,29 +280,18 @@ class MainCockpit(QMainWindow):
             try:
                 self.telemetry_worker.socket.shutdown(socket.SHUT_RDWR)
                 self.telemetry_worker.socket.close()
+                self.telemetry_worker.wait(1)
             except Exception as e:
                 print(f"[DEBUG] Socket already closed: {e}")
 
-        # 3. Request quit and WAIT for actual termination
-        self.telemetry_worker.quit()
-        self.telemetry_worker.wait(1) # Wait for less than 1 second before force-closing.
-        print("[WARNING] Telemetry worker was forced into termination.")
-        
         event.accept()
         print("[SUCCESS] Cockpit closed successfully.")
 
+        from features.clear_pycache import clear_pycache
+        
+        try:
+            clear_pycache('/mnt/Zero-G_Files/Zero-G_Admin_Helper')
+        except Exception as e:
+            print(f"[ERROR] Cleanup failed: {e}")
 
-# Kept for continuity, though its contents are currently integrated directly into the new Telemetry frame
-class TelemetryPanel(QFrame):
-    def __init__(self, title):
-        super().__init__()
-        self.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Raised)
-        self.layout = QVBoxLayout(self)
-        
-        # Panel Title
-        self.title_label = QLabel(title)
-        self.layout.addWidget(self.title_label)
-        
-        # Telemetry Data Placeholder
-        self.data_label = QLabel("INITIALIZING...")
-        self.layout.addWidget(self.data_label)
+        event.accept()
