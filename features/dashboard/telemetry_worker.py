@@ -91,4 +91,4 @@ class TelemetryWorker(QThread):
                 self.socket.close()
             except:
                 pass
-        self.wait()
+        self.wait(1)

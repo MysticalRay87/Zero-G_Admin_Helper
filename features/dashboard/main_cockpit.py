@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPainter, QPixmap
 
 from features.dashboard.telemetry_worker import TelemetryWorker
+from features.dashboard.command_pipe import CommandPipe
 
 '''
 ->self.mid_row_layout (QHBoxLayout): The invisible horizontal wrapper that keeps the Player Table and Button Matrix side-by-side.
@@ -267,24 +268,61 @@ class MainCockpit(QMainWindow):
             print("[ERROR] server_config.json is corrupted. Verification failed.")
             self.lbl_target_ip.setText("Target IP: ERROR")
 
+    def init_operational_cores(self):
+        """Initializes and runs isolated multi-threaded system channels."""
+        # 📡 1. The Passive Log Receiver Engine (Inbound Broadcasts)
+        # Stored from server_config parsing coordinates dynamically
+        self.telemetry_worker = TelemetryWorker()
+        
+        # Bridge worker signaling outputs safely onto your HUD visualization widgets
+        self.telemetry_worker.log_received.connect(self.append_log_to_hud)
+        self.telemetry_worker.connection_status.connect(self.update_telemetry_status_indicator)
+        
+        # Launch passive tracking loop outside GUI execution context
+        self.telemetry_worker.start()
+        print("[SUCCESS] Asynchronous read-only telemetry engine worker activated.")
+
+        # 🕹️ 2. The Command Core Pipeline Engine (Outbound Ephemeral Packets)
+        # Automatically extracts IP/Port/Passkey details from data/server_config.json
+        self.command_pipe = CommandPipe()
+        
+        # Bridge status metrics back to your administrative message log or notification bars
+        self.command_pipe.command_sent.connect(lambda cmd: print(f"[HUD NOTIFY] Command flushed successfully: {cmd}"))
+        self.command_pipe.pipe_error.connect(lambda err: print(f"[HUD WARNING] Outbound pipeline failure: {err}"))
+        
+        # Launch thread-safe FIFO queue queue monitor loop
+        self.command_pipe.start()
+        print("[SUCCESS] Asynchronous outbound Command Core pipeline activated.")
+
+    def handle_console_submission(self):
+        """Captures input text from operator console line edits and forwards to pipeline."""
+        # Example intercept hook for your command input submit event (e.g., returnPressed)
+        raw_input_text = self.console_input_field.text().strip()
+        
+        if raw_input_text:
+            # Enqueue the instruction into our ephemeral burst channel worker
+            self.command_pipe.send_command(raw_input_text)
+            
+            # Clear line entry frame layout immediately to clear the screen for next command
+            self.console_input_field.clear()
+
 
     def closeEvent(self, event):
-        """Standardized, safe shutdown sequence."""
-        print("[STATUS] Shutdown signal received. Closing telemetry worker...")
+        """Intercepts application window shutdown signals to cleanly kill threads."""
+        print("[STATUS] Stopping core dashboard subsystems gracefully...")
         
-        # 1. Flag the worker to terminate
-        self.telemetry_worker.isRunning = False
-        
-        # 2. Force socket shutdown to break the blocking recv()
-        if hasattr(self.telemetry_worker, 'socket') and self.telemetry_worker.socket:
-            try:
-                self.telemetry_worker.socket.shutdown(socket.SHUT_RDWR)
-                self.telemetry_worker.socket.close()
-                self.telemetry_worker.wait(1)
-            except Exception as e:
-                print(f"[DEBUG] Socket already closed: {e}")
+        # 📡 Stop the passive log consumer thread
+        if hasattr(self, 'telemetry_worker') and self.telemetry_worker is not None:
+            if self.telemetry_worker.isRunning():
+                print("[DEBUG] Signaling TelemetryWorker teardown...")
+                self.telemetry_worker.stop()
+                
+        # 🕹️ Stop the outbound ephemeral pipeline queue loop
+        if hasattr(self, 'command_pipe') and self.command_pipe is not None:
+            if self.command_pipe.isRunning():
+                print("[DEBUG] Signaling CommandPipe teardown...")
+                self.command_pipe.stop()
 
-        event.accept()
         print("[SUCCESS] Cockpit closed successfully.")
 
         from features.clear_pycache import clear_pycache
@@ -294,4 +332,5 @@ class MainCockpit(QMainWindow):
         except Exception as e:
             print(f"[ERROR] Cleanup failed: {e}")
 
+         # Accept the close action and let PyQt handle standard application cleanup
         event.accept()
