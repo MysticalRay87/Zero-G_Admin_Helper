@@ -1,4 +1,5 @@
 import os
+import os
 import json
 import socket # Added missing socket import for shutdown
 from PyQt6 import QtCore
@@ -8,6 +9,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QHeaderView, QStackedWidget
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPainter, QPixmap
 from PyQt6.QtGui import QPainter, QPixmap
 
 from features.dashboard.telemetry_worker import TelemetryWorker
@@ -53,11 +55,32 @@ class MainCockpit(QMainWindow):
                 QPushButton { background-color: rgba(0, 85, 119, 150); color: #ffffff; border: 1px solid #00d4ff; }
                 QPushButton:hover { background-color: rgba(0, 150, 200, 200); }
             """)
+        self.setFixedSize(1280, 900)
+
+        # --- Style Application ---
+        try:
+            with open("assets/ZAH.css", "r") as f:
+                self.setStyleSheet(f.read())
+            print(f"[SUCCESS] ZAH.css fully integrated.")
+        except FileNotFoundError:
+            print("[WARNING] ZAH.css not found. Skipping theme application.")
+            # Fallback Glassmorphism Styling so the background is visible
+            # Note: This is an emergency fallback. Primary styling is handled in ZAH.css.
+            self.setStyleSheet("""
+                QFrame { background-color: rgba(15, 25, 35, 180); border: 1px solid #00d4ff; border-radius: 5px; }
+                QLabel { background-color: transparent; border: none; color: #00d4ff; font-weight: bold; }
+                QTextEdit, QTableWidget { background-color: rgba(10, 15, 25, 200); color: #e0e0e0; border: 1px solid #005577; }
+                QHeaderView::section { background-color: rgba(20, 30, 45, 220); color: #00d4ff; }
+                QPushButton { background-color: rgba(0, 85, 119, 150); color: #ffffff; border: 1px solid #00d4ff; }
+                QPushButton:hover { background-color: rgba(0, 150, 200, 200); }
+            """)
         
         # --- Central UI Canvas ---
         self.central_widget = QWidget()
         self.central_widget.setObjectName("CentralWidgetCanvas")
+        self.central_widget.setObjectName("CentralWidgetCanvas")
         self.setCentralWidget(self.central_widget)
+        self.background = QPixmap("assets/backgrounds/background.png")
         self.background = QPixmap("assets/backgrounds/background.png")
 
         # --- Master Layout Definition ---
@@ -66,10 +89,18 @@ class MainCockpit(QMainWindow):
         # INCREASED MARGINS: These push the widgets inward so they sit inside the drawn HUD lines.
         self.master_layout.setContentsMargins(65, 100, 65, 80) 
         self.master_layout.setSpacing(15)
+        # --- Master Layout Definition ---
+        self.master_layout = QHBoxLayout(self.central_widget)
+        
+        # INCREASED MARGINS: These push the widgets inward so they sit inside the drawn HUD lines.
+        self.master_layout.setContentsMargins(65, 100, 65, 80) 
+        self.master_layout.setSpacing(15)
 
+        # 1. Grid Initialization        
         # 1. Grid Initialization        
         self.setup_zones()
 
+        # 2. Start background telemetry threads
         # 2. Start background telemetry threads
         # --- Telemetry Engine Initialization ---
         self.telemetry_worker = TelemetryWorker()
@@ -92,7 +123,28 @@ class MainCockpit(QMainWindow):
         painter.drawPixmap(0, 0, scaled_bg)
         painter.end()
     
+
+        # 3. Load configurations and populate the UI Last
+        self.load_network_config()
+
+    def paintEvent(self, event):
+        """Force the background image to render on the MainCockpit."""
+        painter = QPainter(self)
+        # Scale image to fit the window exactly
+        scaled_bg = self.background.scaled(self.size(), Qt.AspectRatioMode.IgnoreAspectRatio)
+        painter.drawPixmap(0, 0, scaled_bg)
+        painter.end()
+    
     def setup_zones(self):
+        """
+        Constructs the UI zones using a primary Left Column (Communications) 
+        and a Right Column (Telemetry, Players, Controls).
+        """
+        # =====================================================
+        # LEFT COLUMN (approx 35%): Data Feed & Chat/Commands 
+        # Handles all primary communication and log outputs.
+        # =====================================================
+        self.left_column = QVBoxLayout()
         """
         Constructs the UI zones using a primary Left Column (Communications) 
         and a Right Column (Telemetry, Players, Controls).
@@ -117,9 +169,50 @@ class MainCockpit(QMainWindow):
 
         # --- (7) Display Panel for Data Feed ---
         # The large text area displaying live chat, logs, or admin feedback.
+        # --- (6) Data Feed Panel Control ---
+        # Dropdown menu to toggle the context of the main console panel.
+        self.feed_selector = QComboBox()
+        self.feed_selector.setObjectName("FeedSelector")
+        self.feed_selector.addItems([
+            "Global Live Feed Chat", 
+            "Faction Live Feed Chat", 
+            "Admin Command Console", 
+            "Active Logs"
+        ])
+        self.left_column.addWidget(self.feed_selector)
+
+        # --- (7) Display Panel for Data Feed ---
+        # The large text area displaying live chat, logs, or admin feedback.
         self.console = QTextEdit()
         self.console.setObjectName("ConsoleDisplay")
         self.console.setReadOnly(True)
+        self.console.setPlaceholderText("Data stream initializing...")
+        self.left_column.addWidget(self.console, stretch=1)
+
+        # --- (8) Chat/Command Input Area ---
+        # Text entry line and execution button for sending inputs to the server.
+        self.input_layout = QHBoxLayout()
+        self.cmd_input = QLineEdit()
+        self.cmd_input.setObjectName("CommandInput")
+        self.cmd_input.setPlaceholderText("Enter Chat or Admin Command...")
+        
+        self.execute_btn = QPushButton("Execute")
+        self.execute_btn.setObjectName("ExecuteButton")
+        
+        self.input_layout.addWidget(self.cmd_input, stretch=4)
+        self.input_layout.addWidget(self.execute_btn, stretch=1)
+        self.left_column.addLayout(self.input_layout)
+
+        # Add Left Column to Master Layout
+        self.master_layout.addLayout(self.left_column, stretch=35)
+
+
+        # =====================================================
+        # RIGHT COLUMN (approx 65%): Telemetry, Players, Controls
+        # Handles dynamic data viewing, server health, and interactive control matrices.
+        # =====================================================
+        self.right_column = QVBoxLayout()
+        self.right_column.setSpacing(15)
         self.console.setPlaceholderText("Data stream initializing...")
         self.left_column.addWidget(self.console, stretch=1)
 
