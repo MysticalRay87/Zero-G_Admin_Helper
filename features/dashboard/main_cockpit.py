@@ -1,6 +1,7 @@
+
 import os
 import json
-import socket # Added missing socket import for shutdown
+import socket 
 from PyQt6 import QtCore
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QGridLayout, QFrame, QLabel, QVBoxLayout, 
@@ -12,21 +13,10 @@ from PyQt6.QtGui import QPainter, QPixmap
 
 from features.dashboard.telemetry_worker import TelemetryWorker
 
-'''
-->self.mid_row_layout (QHBoxLayout): The invisible horizontal wrapper that keeps the Player Table and Button Matrix side-by-side.
-->self.player_registry (QFrame): The visible box holding the player info. Sits on the left side of the mid-row.
-->self.lbl_players_header (QLabel): (Blueprint #9) The text title saying "Players on server".
-->self.player_table (QTableWidget): (Blueprint #10) The actual 5-column spreadsheet/grid displaying player data.
-->self.control_panel (QFrame): The visible box holding the command matrix. Sits on the right side of the mid-row.
-->self.matrix_buttons (List of QPushButtons): (Blueprint #11) This is a Python list holding all 18 buttons in your 3x6 grid. 
-   -They don't have individual self names; instead, they are generated in a loop and stored here so you can program them later.
-->self.display_fbp (QFrame): Display for Functional button panel
-'''
-
 class MainCockpit(QMainWindow):
     """
     Screen 3: Main Administration Cockpit Dashboard.
-    The primary hub for server telemetry and command execution.
+    Persistent multi-threaded dashboard featuring a fluid layout-retaining data feed engine.
     """
     def __init__(self):
         super().__init__()
@@ -35,7 +25,7 @@ class MainCockpit(QMainWindow):
         self.setWindowTitle("Zero-G Admin Helper - Main Cockpit")
         self.setFixedSize(1280, 900)
 
-        # --- Style Application (Fixed to load exactly once) ---
+        # --- Style Application ---
         try:
             with open("assets/ZAH.css", "r") as f:
                 self.setStyleSheet(f.read())
@@ -57,48 +47,44 @@ class MainCockpit(QMainWindow):
         self.setCentralWidget(self.central_widget)
         self.background = QPixmap("assets/backgrounds/background.png")
 
-        # --- Master Layout Definition (Fixed warning by creating first, then assigning once) ---
+        # --- Master Layout Definition ---
         self.master_layout = QHBoxLayout()
         self.master_layout.setContentsMargins(65, 100, 65, 80) 
         self.master_layout.setSpacing(15)
         self.central_widget.setLayout(self.master_layout)
 
-        # 1. Grid Initialization        
+        # 1. Grid Layout Construction
         self.setup_zones()
 
-        # 2. Start background telemetry threads
-        # --- Telemetry Engine Initialization ---
+        # 2. Asynchronous Thread Operations
         self.telemetry_worker = TelemetryWorker()
         self.telemetry_worker.log_received.connect(self.update_console_output)
         self.telemetry_worker.connection_status.connect(self.update_server_status, QtCore.Qt.ConnectionType.QueuedConnection)
         self.telemetry_worker.start()
         
-        # Initial log confirmation for registry sync
         print("[SUCCESS] Main Cockpit Dashboard initialized.")
 
-        # 3. Load configurations and populate the UI Last
+        # 3. Dynamic Configuration Loading
         self.load_network_config()
 
     def paintEvent(self, event):
-        """Force the background image to render on the MainCockpit."""
+        """Force background canvas visualization mapping."""
         painter = QPainter(self)
-        # Scale image to fit the window exactly
         scaled_bg = self.background.scaled(self.size(), Qt.AspectRatioMode.IgnoreAspectRatio)
         painter.drawPixmap(0, 0, scaled_bg)
         painter.end()
     
     def setup_zones(self):
         """
-        Constructs the UI zones using a primary Left Column (Communications) 
-        and a Right Column (Telemetry, Players, Controls).
+        Constructs Left Column (Communications Core via Card Stack) 
+        and Right Column (Metrics & Matrices).
         """
         # =====================================================
-        # LEFT COLUMN (approx 35%): Data Feed & Chat/Commands 
-        # Handles all primary communication and log outputs.
+        # LEFT COLUMN (35%): Stacked Communications Engine
         # =====================================================
         self.left_column = QVBoxLayout()
 
-        # --- (6) Data Feed Panel Control ---
+        # --- (6) Data Feed Panel Control Dropdown ---
         self.feed_selector = QComboBox()
         self.feed_selector.setObjectName("FeedSelector")
         self.feed_selector.addItems([
@@ -107,16 +93,44 @@ class MainCockpit(QMainWindow):
             "Admin Command Console", 
             "Active Logs"
         ])
+        self.feed_selector.currentTextChanged.connect(self.toggle_console_visibility)
         self.left_column.addWidget(self.feed_selector)
 
-        # --- (7) Display Panel for Data Feed ---
+        # --- (7) Multi-Layer Display Card Deck Stack ---
+        self.feed_stack = QStackedWidget()
+        self.feed_stack.setObjectName("FeedStack")
+
+        # Card 0: Global Chat display container box
+        self.global_chat_box = QTextEdit()
+        self.global_chat_box.setReadOnly(True)
+        self.global_chat_box.setPlaceholderText("Global communication feeds stand by...")
+        
+        # Card 1: Faction Chat display container box
+        self.faction_chat_box = QTextEdit()
+        self.faction_chat_box.setReadOnly(True)
+        self.faction_chat_box.setPlaceholderText("Faction communication feeds stand by...")
+
+        # Card 2: Dedicated Admin Command Terminal display frame
         self.console = QTextEdit()
         self.console.setObjectName("ConsoleDisplay")
         self.console.setReadOnly(True)
         self.console.setPlaceholderText("Data stream initializing...")
-        self.left_column.addWidget(self.console, stretch=1)
 
-        # --- (8) Chat/Command Input Area ---
+        # Card 3: System Logs display container box
+        self.system_logs_box = QTextEdit()
+        self.system_logs_box.setReadOnly(True)
+        self.system_logs_box.setPlaceholderText("System diagnostic records stand by...")
+
+        # Mount layouts down onto card index rails
+        self.feed_stack.addWidget(self.global_chat_box) # Index 0
+        self.feed_stack.addWidget(self.faction_chat_box) # Index 1
+        self.feed_stack.addWidget(self.console)          # Index 2
+        self.feed_stack.addWidget(self.system_logs_box) # Index 3
+
+        # Add Stack to column without collapsing space layout rules
+        self.left_column.addWidget(self.feed_stack, stretch=1)
+
+        # --- (8) Input Submission Field Panel ---
         self.input_layout = QHBoxLayout()
         self.cmd_input = QLineEdit()
         self.cmd_input.setObjectName("CommandInput")
@@ -129,17 +143,15 @@ class MainCockpit(QMainWindow):
         self.input_layout.addWidget(self.execute_btn, stretch=1)
         self.left_column.addLayout(self.input_layout)
 
-        # Add Left Column to Master Layout
         self.master_layout.addLayout(self.left_column, stretch=35)
 
         # =====================================================
-        # RIGHT COLUMN (approx 65%): Telemetry, Players, Controls
-        # Handles dynamic data viewing, server health, and interactive control matrices.
+        # RIGHT COLUMN (65%): Metrics & Matrices
         # =====================================================
         self.right_column = QVBoxLayout()
         self.right_column.setSpacing(15)
 
-        # --- TOP SECTION: Telemetry Grid (Panels 2, 3, 4, 5) ---
+        # --- Telemetry Metric Panel Header ---
         self.telemetry_frame = QFrame()
         self.telemetry_frame.setObjectName("TelemetryPanel")
         self.telemetry_layout = QGridLayout(self.telemetry_frame)
@@ -157,10 +169,9 @@ class MainCockpit(QMainWindow):
         
         self.right_column.addWidget(self.telemetry_frame, stretch=1)
 
-        # --- MIDDLE SECTION: Players (9,10) AND Matrix (11) Side-by-Side ---
+        # --- Player Matrix & Macros Mid Section ---
         self.mid_row_layout = QHBoxLayout()
 
-        # Left Side of Mid Row: Player Registry Grid
         self.player_registry = QFrame()
         self.player_registry.setObjectName("PlayerRegistry")
         self.players_layout = QVBoxLayout(self.player_registry)
@@ -178,7 +189,6 @@ class MainCockpit(QMainWindow):
         self.players_layout.addWidget(self.player_table)
         self.mid_row_layout.addWidget(self.player_registry, stretch=1)
 
-        # Right Side of Mid Row: Functional Button Panel Control Grid
         self.control_panel = QFrame()
         self.control_panel.setObjectName("ControlPanel")
         self.button_grid = QGridLayout(self.control_panel)
@@ -196,10 +206,9 @@ class MainCockpit(QMainWindow):
         self.mid_row_layout.addWidget(self.control_panel, stretch=1)
         self.right_column.addLayout(self.mid_row_layout, stretch=3)
 
-        # --- BOTTOM SECTION: Dynamic Displays (12 & 13) Side-by-Side ---
+        # --- Dynamic Stacked Sub-Panels Section Lower Row ---
         self.bottom_row_layout = QHBoxLayout()
 
-        # Dynamic Display Area A
         self.display_fbp = QFrame()
         self.display_fbp.setObjectName("DynamicDisplayA")
         self.layout_fbp = QVBoxLayout(self.display_fbp)
@@ -213,41 +222,38 @@ class MainCockpit(QMainWindow):
         self.bottom_row_layout.addWidget(self.display_fbp, stretch=1)
         self.right_column.addLayout(self.bottom_row_layout, stretch=3)
 
-        # Finally, attach the entire Right Column to the Master Layout
         self.master_layout.addLayout(self.right_column, stretch=65)
         print("[SUCCESS] Main Cockpit grid initialized.")
 
-    def update_console_output(self, log_line):
-        """Slot to receive signal from worker and update UI."""
-        self.console.append(log_line)
+    def toggle_console_visibility(self, selected_text):
+        """Pivots active visible deck layers smoothly matching dropdown choices."""
+        if selected_text == "Global Live Feed Chat":
+            self.feed_stack.setCurrentIndex(0)
+        elif selected_text == "Faction Live Feed Chat":
+            self.feed_stack.setCurrentIndex(1)
+        elif selected_text == "Admin Command Console":
+            self.feed_stack.setCurrentIndex(2)
+        elif selected_text == "Active Logs":
+            self.feed_stack.setCurrentIndex(3)
+
+    def update_console_output(self, data_text):
+        """Directs logs safely onto your terminal frame."""
+        if data_text:
+            self.console.append(data_text.strip())
 
     def load_network_config(self):
-        """Loads saved server connection profiles and populates telemetry labels."""
-        try:
-            config_path = os.path.abspath("data/server_config.json")
-            print(f"[DEBUG] Cockpit attempting to read: {config_path}")
-
-            with open(config_path, "r") as f:
-                config_data = json.load(f)
-
-            print(f"[DEBUG] Cockpit loaded dictionary: {config_data}")
-                
-            saved_ip = config_data.get("input_ip", "127.0.0.1")
-            saved_port = config_data.get("input_port", "30000")
-            
-            self.lbl_target_ip.setText(f"Target IP: {saved_ip}:{saved_port}")
-            print(f"[SUCCESS] Loaded connection profile: {saved_ip}:{saved_port}")
-            
-        except FileNotFoundError:
-            print("[WARNING] server_config.json profile not found. Defaulting to local loopback telemetry.")
-            self.lbl_target_ip.setText("Target IP: UNKNOWN (Config Missing)")
-            
-        except json.JSONDecodeError:
-            print("[ERROR] server_config.json is corrupted. Verification failed.")
-            self.lbl_target_ip.setText("Target IP: ERROR")
+        """Loads configuration profile values dynamically."""
+        config_path = "data/server_config.json"
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r") as f:
+                    data = json.load(f)
+                    self.lbl_target_ip.setText(f"Target IP: {data.get('input_ip', 'None')}")
+            except Exception as e:
+                print(f"[ERROR] Registry parsing delay: {e}")
 
     def update_server_status(self, is_online):
-        """Updates the status label based on telemetry stream health."""
+        """Toggles real-time network presence alerts."""
         if is_online:
             self.lbl_server_status.setText("Server Status: ONLINE")
             self.lbl_server_status.setStyleSheet("color: #00FF00; font-weight: bold;")
@@ -256,9 +262,8 @@ class MainCockpit(QMainWindow):
             self.lbl_server_status.setStyleSheet("color: #FF0000; font-weight: bold;")
 
     def closeEvent(self, event):
-        """Standardized, safe shutdown sequence."""
-        print("[STATUS] Shutdown signal received. Closing telemetry worker...")
-        
+        """Gracefully signs off connection streams on escape requests."""
+        print("[STATUS] Shutdown signal received. Closing telemetry worker and clearing cache files...")
         self.telemetry_worker.is_running = False
         
         if hasattr(self.telemetry_worker, 'socket') and self.telemetry_worker.socket:
@@ -270,19 +275,16 @@ class MainCockpit(QMainWindow):
 
         self.telemetry_worker.quit()
         self.telemetry_worker.wait(1)
-        print("[WARNING] Telemetry worker was forced into termination.")
-        
-        event.accept()
         print("[SUCCESS] Cockpit closed successfully.")
 
-class TelemetryPanel(QFrame):
-    def __init__(self, title):
-        super().__init__()
-        self.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Raised)
-        self.layout = QVBoxLayout(self)
+        from features.clear_pycache import clear_pycache
+
+            # Execute the cleanup script
+        try:
+            # Pass your project root directory path here
+            clear_pycache('/mnt/Zero-G_Files/Zero-G_Admin_Helper')
+        except Exception as e:
+            print(f"[ERROR] Cleanup failed: {e}")
         
-        self.title_label = QLabel(title)
-        self.layout.addWidget(self.title_label)
-        
-        self.data_label = QLabel("INITIALIZING...")
-        self.layout.addWidget(self.data_label)
+        # Accept the event to proceed with closing
+        event.accept()
