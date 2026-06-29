@@ -7,20 +7,19 @@ import time
 class TelemetryWorker(QThread):
     # Establish signals to communicate data pulses back to the main cockpit UI
     log_received = pyqtSignal(str)
-    server_status_changed = pyqtSignal(bool)
     connection_status = pyqtSignal(bool)
-    
+
     def __init__(self, config_path="data/server_config.json"):
         super().__init__()
-        self.socket = None
         self.config_path = config_path
         self.is_running = False
+        self.socket = None
         
-        # Load settings and credentials dynamically using clean class scoping
-        self.host, self.port, self.password = self._load_settings()
+        # Dynamically load destination coordinates and passkey
+        self.host, self.port, self.password = self._load_credentials()
 
-    def _load_settings(self):
-        """Loads connection coordinates and passkeys from JSON storage safely."""
+    def _load_credentials(self):
+        """Loads networking parameters and authentication keys from local storage safely."""
         if not os.path.exists(self.config_path):
             print("[DEBUG] Config not found, defaulting to localhost.")
             return "127.0.0.1", 30004, ""
@@ -47,15 +46,14 @@ class TelemetryWorker(QThread):
                 self.socket.settimeout(15.0)
                 self.socket.connect((self.host, int(self.port)))
                 
-                # Consume initial challenge prompt "Please enter password:" if broadcasted immediately
+                # --- HANDSHAKE SUPPRESSION GATE ---
+                # Silently clear out the initial challenge greeting ("Please enter password:")
                 try:
-                    greeting = self.socket.recv(1024).decode('utf-8', errors='ignore')
-                    if greeting:
-                        self.log_received.emit(greeting)
+                    self.socket.recv(1024)
                 except socket.timeout:
                     pass
 
-                # --- ONE-TIME AUTHENTICATION HANDSHAKE ---
+                # Inject credentials to unblock the game server data pipe
                 if self.password:
                     print("[DEBUG] Injecting network validation handshake...")
                     auth_payload = f"{self.password}\r\n"
@@ -77,13 +75,13 @@ class TelemetryWorker(QThread):
                             break
 
                         decoded_line = raw_bytes.decode('utf-8', errors='ignore')
+                        
+                        # Filter out raw font tags or empty telemetry artifacts if any are sent
                         if "currentFont" not in decoded_line:
                             self.log_received.emit(decoded_line)
 
                     except socket.timeout:
                         # --- DEDICATED TELNET HEARTBEAT PULSE ---
-                        # The stream didn't crash—it has just been quiet for 5 seconds.
-                        # Send an empty carriage return line feed to reset the server's drop timer.
                         if self.is_running and self.socket:
                             try:
                                 self.socket.sendall(b"\r\n")
@@ -93,11 +91,11 @@ class TelemetryWorker(QThread):
 
             except socket.timeout:
                 print("[ERROR] Telemetry stream timed out waiting for server broadcast.")
-                self.server_status_changed.emit(False)
+                self.connection_status.emit(False)
             except Exception as e:
                 if self.is_running:
                     print(f"[ERROR] Telemetry network exception occurred: {str(e)}")
-                self.server_status_changed.emit(False)
+                self.connection_status.emit(False)
             finally:
                 if self.socket:
                     try:
