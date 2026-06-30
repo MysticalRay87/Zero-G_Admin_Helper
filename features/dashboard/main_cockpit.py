@@ -13,6 +13,46 @@ from PyQt6.QtGui import QPainter, QPixmap
 
 from features.dashboard.telemetry_worker import TelemetryWorker
 
+class TelemetryWidget(QFrame):
+    """
+    Standalone high-density sub-panel managing server health metrics.
+    Abstracted component for precision placement inside header controls.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("TelemetryPanel")
+        self.setFixedSize(330, 50)  # Strict dimensional boundary control
+        self.setStyleSheet("""
+            QFrame#TelemetryPanel {
+                background-color: rgba(10, 15, 25, 140);
+                border: 1px solid #005577;
+                border-radius: 4px;
+            }
+            QLabel {
+                font-size: 11px;  /* Highly compressed font footprint */
+                color: #e0e0e0;
+                background: transparent;
+                border: none;
+            }
+        """)
+
+        # Micro sub-grid coordinates mapped inside the shrunk layout structure
+        self.telemetry_layout = QGridLayout(self)
+        self.telemetry_layout.setContentsMargins(6, 4, 6, 4)
+        self.telemetry_layout.setSpacing(6)
+
+        # --- Upper Telemetry Matrix Elements ---
+        self.lbl_target_ip = QLabel("Target IP: Loading...", self)
+        self.lbl_server_status = QLabel("Server Status: DETECTING....", self)
+        self.telemetry_layout.addWidget(self.lbl_target_ip, 0, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.telemetry_layout.addWidget(self.lbl_server_status, 0, 1, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+
+        # --- Lower Telemetry Matrix Elements ---
+        self.lbl_server_cpu = QLabel("Server CPU Usage: --%", self)
+        self.lbl_server_ram = QLabel("Server RAM Usage: --%", self)
+        self.telemetry_layout.addWidget(self.lbl_server_cpu, 1, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.telemetry_layout.addWidget(self.lbl_server_ram, 1, 1, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+
 class MainCockpit(QMainWindow):
     """
     Screen 3: Main Administration Cockpit Dashboard.
@@ -49,15 +89,14 @@ class MainCockpit(QMainWindow):
 
         # --- Master Layout Definition ---
         self.master_layout = QHBoxLayout()
-        self.master_layout.setContentsMargins(65, 100, 65, 80) 
+        self.master_layout.setContentsMargins(90, 205, 90, 95) 
         self.master_layout.setSpacing(15)
         self.central_widget.setLayout(self.master_layout)
 
-        # --- Core Telemetry Widget Allocation ---
-        self.lbl_target_ip = QLabel("Target IP: Loading...", self)
-        self.lbl_server_status = QLabel("Server Status: UNKNOWN", self)
-        self.lbl_server_cpu = QLabel("Server CPU Usage: --%", self)
-        self.lbl_server_ram = QLabel("Server RAM Usage: --%", self)
+        # --- Core Standalone Telemetry Component Allocation ---
+        self.telemetry_widget = TelemetryWidget(self)
+        self.telemetry_widget.move(850, 120)
+        self.telemetry_widget.show()
 
         # 1. Grid Layout Construction
         self.setup_zones()
@@ -88,50 +127,13 @@ class MainCockpit(QMainWindow):
         # =====================================================
         # TOP SYSTEM ROW: Unified Header Strip
         # =====================================================
-        # Dedicated layout row to bind Title and Shrunk Telemetry horizontally
         self.top_header_layout = QHBoxLayout()
-        self.top_header_layout.setContentsMargins(10, 5, 3, 10)
+        self.top_header_layout.setContentsMargins(10, 0, 10, 10)
 
         # Push the upcoming metrics box completely to the right side next to the words
         self.top_header_layout.addStretch()
 
-        # --- High-Density Shrunk Telemetry Panel Box ---
-        self.telemetry_frame = QFrame()
-        self.telemetry_frame.setObjectName("TelemetryPanel")
-        self.telemetry_frame.setFixedSize(360, 50) # Strict dimensional boundary control
-        self.telemetry_frame.setStyleSheet("""
-            QFrame#TelemetryPanel {
-                background-color: rgba(10, 15, 25, 140);
-                border: 1px solid #005577;
-                border-radius: 4px;
-            }
-            QLabel {
-                font-size: 11px; /* Highly compressed font footprint */
-                color: #e0e0e0;
-                background: transparent;
-                border: none;
-            }
-        """)
-
-        # Micro sub-grid coordinates mapped inside the shrunk layout structure
-        self.telemetry_layout = QGridLayout(self.telemetry_frame)
-        self.telemetry_layout.setContentsMargins(6, 4, 6, 4)
-        self.telemetry_layout.setSpacing(6)
-        
-        # --- Upper Telemetry Matrix (Top-Right of Header Box) ---
-        self.lbl_target_ip = QLabel("Target IP: Loading...")
-        self.lbl_server_status = QLabel("Server Status: DETECTING....")
-        self.telemetry_layout.addWidget(self.lbl_target_ip, 0, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        self.telemetry_layout.addWidget(self.lbl_server_status, 0, 1, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-
-        # --- Lower Telemetry Matrix (Bottom-Right of Header Box) ---
-        self.lbl_server_cpu = QLabel("Server CPU Usage: --%", self)
-        self.lbl_server_ram = QLabel("Server RAM Usage: --%", self)
-        self.telemetry_layout.addWidget(self.lbl_server_cpu, 1, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        self.telemetry_layout.addWidget(self.lbl_server_ram, 1, 1, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-
-        # Add the completed high-density metric block to the horizontal header strip
-        self.top_header_layout.addWidget(self.telemetry_frame)
+        # Integrate the abstracted telemetry widget into the horizontal header strip
 
         # =====================================================
         # LEFT COLUMN (35%): Stacked Communications Engine
@@ -202,9 +204,6 @@ class MainCockpit(QMainWindow):
         # =====================================================
         self.right_column = QVBoxLayout()
         self.right_column.setSpacing(15)
-
-        # Note: The old self.telemetry_frame code has been removed from here 
-        # to ensure it does not render a duplicate empty space inside the column setup.
 
         # --- Player Matrix & Macros Mid Section ---
         self.mid_row_layout = QHBoxLayout()
@@ -293,24 +292,29 @@ class MainCockpit(QMainWindow):
             self.console.append(data_text.strip())
 
     def load_network_config(self):
-        """Loads configuration profile values dynamically."""
+        """Loads and applies the network configuration to the UI components."""
+        # Define the path to the config
         config_path = "data/server_config.json"
+        
         if os.path.exists(config_path):
-            try:
-                with open(config_path, "r") as f:
-                    data = json.load(f)
-                    self.lbl_target_ip.setText(f"Target IP: {data.get('input_ip', 'None')}")
-            except Exception as e:
-                print(f"[ERROR] Registry parsing delay: {e}")
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+                ip = config.get("input_ip", "Unknown")
+                port = config.get("input_port", "Unknown")
+                
+                # Update the label inside the new detached telemetry widget
+                self.telemetry_widget.lbl_target_ip.setText(f"Target IP: {ip}")
+        else:
+            self.telemetry_widget.lbl_target_ip.setText("Target IP: Not Configured")
 
     def update_server_status(self, is_online):
         """Toggles real-time network presence alerts."""
         if is_online:
-            self.lbl_server_status.setText("Server Status: ONLINE")
-            self.lbl_server_status.setStyleSheet("color: #00FF00; font-weight: bold;")
+            self.telemetry_widget.lbl_server_status.setText("Server Status: ONLINE")
+            self.telemetry_widget.lbl_server_status.setStyleSheet("color: #00FF00; font-weight: bold;")
         else:
-            self.lbl_server_status.setText("Server Status: OFFLINE")
-            self.lbl_server_status.setStyleSheet("color: #FF0000; font-weight: bold;")
+            self.telemetry_widget.lbl_server_status.setText("Server Status: OFFLINE")
+            self.telemetry_widget.lbl_server_status.setStyleSheet("color: #FF0000; font-weight: bold;")
 
     def closeEvent(self, event):
         """Gracefully signs off connection streams on escape requests."""
