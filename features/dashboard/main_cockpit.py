@@ -53,6 +53,12 @@ class MainCockpit(QMainWindow):
         self.master_layout.setSpacing(15)
         self.central_widget.setLayout(self.master_layout)
 
+        # --- Core Telemetry Widget Allocation ---
+        self.lbl_target_ip = QLabel("Target IP: Loading...", self)
+        self.lbl_server_status = QLabel("Server Status: UNKNOWN", self)
+        self.lbl_server_cpu = QLabel("Server CPU Usage: --%", self)
+        self.lbl_server_ram = QLabel("Server RAM Usage: --%", self)
+
         # 1. Grid Layout Construction
         self.setup_zones()
 
@@ -79,6 +85,54 @@ class MainCockpit(QMainWindow):
         Constructs Left Column (Communications Core via Card Stack) 
         and Right Column (Metrics & Matrices).
         """
+        # =====================================================
+        # TOP SYSTEM ROW: Unified Header Strip
+        # =====================================================
+        # Dedicated layout row to bind Title and Shrunk Telemetry horizontally
+        self.top_header_layout = QHBoxLayout()
+        self.top_header_layout.setContentsMargins(10, 5, 3, 10)
+
+        # Push the upcoming metrics box completely to the right side next to the words
+        self.top_header_layout.addStretch()
+
+        # --- High-Density Shrunk Telemetry Panel Box ---
+        self.telemetry_frame = QFrame()
+        self.telemetry_frame.setObjectName("TelemetryPanel")
+        self.telemetry_frame.setFixedSize(360, 50) # Strict dimensional boundary control
+        self.telemetry_frame.setStyleSheet("""
+            QFrame#TelemetryPanel {
+                background-color: rgba(10, 15, 25, 140);
+                border: 1px solid #005577;
+                border-radius: 4px;
+            }
+            QLabel {
+                font-size: 11px; /* Highly compressed font footprint */
+                color: #e0e0e0;
+                background: transparent;
+                border: none;
+            }
+        """)
+
+        # Micro sub-grid coordinates mapped inside the shrunk layout structure
+        self.telemetry_layout = QGridLayout(self.telemetry_frame)
+        self.telemetry_layout.setContentsMargins(6, 4, 6, 4)
+        self.telemetry_layout.setSpacing(6)
+        
+        # --- Upper Telemetry Matrix (Top-Right of Header Box) ---
+        self.lbl_target_ip = QLabel("Target IP: Loading...")
+        self.lbl_server_status = QLabel("Server Status: DETECTING....")
+        self.telemetry_layout.addWidget(self.lbl_target_ip, 0, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.telemetry_layout.addWidget(self.lbl_server_status, 0, 1, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+
+        # --- Lower Telemetry Matrix (Bottom-Right of Header Box) ---
+        self.lbl_server_cpu = QLabel("Server CPU Usage: --%", self)
+        self.lbl_server_ram = QLabel("Server RAM Usage: --%", self)
+        self.telemetry_layout.addWidget(self.lbl_server_cpu, 1, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.telemetry_layout.addWidget(self.lbl_server_ram, 1, 1, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+
+        # Add the completed high-density metric block to the horizontal header strip
+        self.top_header_layout.addWidget(self.telemetry_frame)
+
         # =====================================================
         # LEFT COLUMN (35%): Stacked Communications Engine
         # =====================================================
@@ -143,31 +197,14 @@ class MainCockpit(QMainWindow):
         self.input_layout.addWidget(self.execute_btn, stretch=1)
         self.left_column.addLayout(self.input_layout)
 
-        self.master_layout.addLayout(self.left_column, stretch=35)
-
         # =====================================================
         # RIGHT COLUMN (65%): Metrics & Matrices
         # =====================================================
         self.right_column = QVBoxLayout()
         self.right_column.setSpacing(15)
 
-        # --- Telemetry Metric Panel Header ---
-        self.telemetry_frame = QFrame()
-        self.telemetry_frame.setObjectName("TelemetryPanel")
-        self.telemetry_layout = QGridLayout(self.telemetry_frame)
-        self.telemetry_layout.setContentsMargins(10, 10, 10, 10)
-        
-        self.lbl_target_ip = QLabel("Target IP: Loading...")
-        self.lbl_server_status = QLabel("Server Status: DETECTING....")
-        self.lbl_cpu_usage = QLabel("CPU: 0%")
-        self.lbl_ram_usage = QLabel("RAM: 0%")
-
-        self.telemetry_layout.addWidget(self.lbl_target_ip, 0, 0, alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
-        self.telemetry_layout.addWidget(self.lbl_server_status, 0, 1, alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        self.telemetry_layout.addWidget(self.lbl_cpu_usage, 1, 0)
-        self.telemetry_layout.addWidget(self.lbl_ram_usage, 1, 1)
-        
-        self.right_column.addWidget(self.telemetry_frame, stretch=1)
+        # Note: The old self.telemetry_frame code has been removed from here 
+        # to ensure it does not render a duplicate empty space inside the column setup.
 
         # --- Player Matrix & Macros Mid Section ---
         self.mid_row_layout = QHBoxLayout()
@@ -222,7 +259,21 @@ class MainCockpit(QMainWindow):
         self.bottom_row_layout.addWidget(self.display_fbp, stretch=1)
         self.right_column.addLayout(self.bottom_row_layout, stretch=3)
 
-        self.master_layout.addLayout(self.right_column, stretch=65)
+        # =====================================================
+        # CANVAS CONSOLIDATION ASSEMBLY
+        # =====================================================
+        # Build the dynamic grid layout split content row
+        self.content_columns_layout = QHBoxLayout()
+        self.content_columns_layout.addLayout(self.left_column, stretch=35)
+        self.content_columns_layout.addLayout(self.right_column, stretch=65)
+
+        # Repackage the master layout vertically: Header Row on top, Content Columns underneath
+        self.master_vertical_layout = QVBoxLayout()
+        self.master_vertical_layout.addLayout(self.top_header_layout)
+        self.master_vertical_layout.addLayout(self.content_columns_layout)
+
+        # Re-apply the combined layout parameters cleanly onto your central workspace
+        self.master_layout.addLayout(self.master_vertical_layout)
         print("[SUCCESS] Main Cockpit grid initialized.")
 
     def toggle_console_visibility(self, selected_text):
