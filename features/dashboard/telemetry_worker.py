@@ -1,13 +1,15 @@
 import json
 import os
-from PyQt6.QtCore import QThread, pyqtSignal
 import socket
 import time
+from PyQt6.QtCore import QThread, pyqtSignal
+from features.dashboard.telemetry_parser import TelemetryParser
 
 class TelemetryWorker(QThread):
     # Establish signals to communicate data pulses back to the main cockpit UI
     log_received = pyqtSignal(str)
     connection_status = pyqtSignal(bool)
+    signal_data_received = pyqtSignal(dict)
 
     def __init__(self, config_path="data/server_config.json"):
         super().__init__()
@@ -17,6 +19,9 @@ class TelemetryWorker(QThread):
         
         # Dynamically load destination coordinates and passkey
         self.host, self.port, self.password = self._load_credentials()
+        
+        # Initialize the parser
+        self.parser = TelemetryParser()
 
     def _load_credentials(self):
         """Loads networking parameters and authentication keys from local storage safely."""
@@ -31,8 +36,7 @@ class TelemetryWorker(QThread):
                 port = int(data.get("input_port", 30004))
                 password = data.get("input_pass", "")
                 return ip, port, password
-        except (json.JSONDecodeError, ValueError) as e:
-            print(f"[ERROR] Config corruption detected while parsing settings: {e}")
+        except (json.JSONDecodeError, Exception):
             return "127.0.0.1", 30004, ""
 
     def run(self):
@@ -63,45 +67,55 @@ class TelemetryWorker(QThread):
                 self.connection_status.emit(True)
                 backoff_delay = 1.0 
 
-                # Enforce a tight 5-second frame to periodically unblock recv() for keep-alives
-                self.socket.settimeout(5.0)
+                # BUFFERED CONSUMER: Wrap socket to enable .readline()
+                stream = self.socket.makefile('r', encoding='utf-8', errors='ignore')
+
+                # Set a long timeout to allow the server's 60-second quiet periods
+                # without corrupting the makefile stream buffer with micro-timeouts
+                self.socket.settimeout(90.0)
 
                 # Passive Stream Consumer Loop (Strict Read-Only + Heartbeat Pulse)
                 while self.is_running:
                     try:
-                        raw_bytes = self.socket.recv(8192)
-                        if not raw_bytes:
-                            print("[DEBUG] Remote host severed the passive logging stream.")
-                            break
+                        line = stream.readline()
 
-                        decoded_line = raw_bytes.decode('utf-8', errors='ignore')
-                        
+                        # If line is empty, the server has closed the connection
+                        if not line: 
+                            print("[DEBUG] Remote host severed the passive logging stream.")
+                            break 
+
                         # Filter out raw font tags or empty telemetry artifacts if any are sent
-                        if "currentFont" not in decoded_line:
-                            self.log_received.emit(decoded_line)
+                        if "currentFont" not in line:
+                            # SANITY BUFFER GUARD: Prevent binary-dump overflows
+                            if len(line) > 1024:
+                                continue
+
+                            self.log_received.emit(line)
+                            
+                            # PARSE: Extract metrics and emit as dict
+                            data = self.parser.parse(line)
+                            if data:
+                                self.signal_data_received.emit(data)
 
                     except socket.timeout:
                         # --- DEDICATED TELNET HEARTBEAT PULSE ---
-                        if self.is_running and self.socket:
-                            try:
-                                self.socket.sendall(b"\r\n")
-                            except Exception:
-                                print("[DEBUG] Heartbeat pulse failed. Connection is stale.")
-                                break
+                        # Timeout here means the server has been completely silent for over 90 seconds.
+                        # Break out to trigger a clean reconnection cycle.
+                        print("[WARNING] Telemetry stream silent for too long. Reconnecting...")
+                        break
+                    except Exception as e:
+                        print(f"[DEBUG] Stream error: {e}")
+                        break
+                stream.close() # Safely close the stream object
 
-            except socket.timeout:
-                print("[ERROR] Telemetry stream timed out waiting for server broadcast.")
-                self.connection_status.emit(False)
             except Exception as e:
                 if self.is_running:
                     print(f"[ERROR] Telemetry network exception occurred: {str(e)}")
                 self.connection_status.emit(False)
             finally:
                 if self.socket:
-                    try:
-                        self.socket.close()
-                    except Exception:
-                        pass
+                    try: self.socket.close()
+                    except: pass
                     self.socket = None
 
             # Interruptible backoff delay for rapid app shutdown compliance
