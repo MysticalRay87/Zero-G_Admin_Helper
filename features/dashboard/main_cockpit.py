@@ -1,4 +1,3 @@
-
 import os
 import json
 import socket 
@@ -39,7 +38,7 @@ class TelemetryWidget(QFrame):
         # Micro sub-grid coordinates mapped inside the shrunk layout structure
         self.telemetry_layout = QGridLayout(self)
         self.telemetry_layout.setContentsMargins(6, 4, 6, 4)
-        self.telemetry_layout.setSpacing(6)
+        self.telemetry_layout.setSpacing(4)
 
         # --- Upper Telemetry Matrix Elements ---
         self.lbl_target_ip = QLabel("Target IP: Loading...", self)
@@ -48,18 +47,32 @@ class TelemetryWidget(QFrame):
         self.telemetry_layout.addWidget(self.lbl_server_status, 0, 1, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
 
         # --- Lower Telemetry Matrix Elements ---
-        self.lbl_server_cpu = QLabel("Server CPU Usage: --%", self)
-        self.lbl_server_ram = QLabel("Server RAM Usage: --%", self)
+        self.lbl_server_cpu = QLabel("CPU: --%", self)
+        self.lbl_server_ram = QLabel("RAM: --%", self)
         self.telemetry_layout.addWidget(self.lbl_server_cpu, 1, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         self.telemetry_layout.addWidget(self.lbl_server_ram, 1, 1, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+
+        # --- Dynamic Log Metrics Ingestion Elements ---
+        self.lbl_fps = QLabel("FPS: --", self)
+        self.lbl_heap = QLabel("Heap: --", self)
+        self.lbl_players = QLabel("Players: --", self)
+        self.lbl_uptime = QLabel("Uptime: --", self)
+        
+        self.telemetry_layout.addWidget(self.lbl_fps, 2, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.telemetry_layout.addWidget(self.lbl_heap, 2, 1, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.telemetry_layout.addWidget(self.lbl_players, 3, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.telemetry_layout.addWidget(self.lbl_uptime, 3, 1, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+
 
 class MainCockpit(QMainWindow):
     """
     Screen 3: Main Administration Cockpit Dashboard.
     Persistent multi-threaded dashboard featuring a fluid layout-retaining data feed engine.
     """
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.setObjectName("MainCockpitCanvas")
 
         # --- Dashboard Configuration ---
         self.setWindowTitle("Zero-G Admin Helper - Main Cockpit")
@@ -105,6 +118,10 @@ class MainCockpit(QMainWindow):
         self.telemetry_worker = TelemetryWorker()
         self.telemetry_worker.log_received.connect(self.update_console_output)
         self.telemetry_worker.connection_status.connect(self.update_server_status, QtCore.Qt.ConnectionType.QueuedConnection)
+        
+        # Connect the new structured telemetry signal
+        self.telemetry_worker.signal_data_received.connect(self.update_telemetry_ui)
+        
         self.telemetry_worker.start()
         
         print("[SUCCESS] Main Cockpit Dashboard initialized.")
@@ -115,8 +132,9 @@ class MainCockpit(QMainWindow):
     def paintEvent(self, event):
         """Force background canvas visualization mapping."""
         painter = QPainter(self)
-        scaled_bg = self.background.scaled(self.size(), Qt.AspectRatioMode.IgnoreAspectRatio)
-        painter.drawPixmap(0, 0, scaled_bg)
+        if not self.background.isNull():
+            scaled_bg = self.background.scaled(self.size(), Qt.AspectRatioMode.IgnoreAspectRatio)
+            painter.drawPixmap(0, 0, scaled_bg)
         painter.end()
     
     def setup_zones(self):
@@ -132,8 +150,6 @@ class MainCockpit(QMainWindow):
 
         # Push the upcoming metrics box completely to the right side next to the words
         self.top_header_layout.addStretch()
-
-        # Integrate the abstracted telemetry widget into the horizontal header strip
 
         # =====================================================
         # LEFT COLUMN (35%): Stacked Communications Engine
@@ -293,14 +309,12 @@ class MainCockpit(QMainWindow):
 
     def load_network_config(self):
         """Loads and applies the network configuration to the UI components."""
-        # Define the path to the config
         config_path = "data/server_config.json"
         
         if os.path.exists(config_path):
             with open(config_path, 'r') as f:
                 config = json.load(f)
                 ip = config.get("input_ip", "Unknown")
-                port = config.get("input_port", "Unknown")
                 
                 # Update the label inside the new detached telemetry widget
                 self.telemetry_widget.lbl_target_ip.setText(f"Target IP: {ip}")
@@ -315,6 +329,17 @@ class MainCockpit(QMainWindow):
         else:
             self.telemetry_widget.lbl_server_status.setText("Server Status: OFFLINE")
             self.telemetry_widget.lbl_server_status.setStyleSheet("color: #FF0000; font-weight: bold;")
+
+    def update_telemetry_ui(self, data):
+        """Processes the structured dictionary received from TelemetryWorker."""
+        if 'fps' in data:
+            self.telemetry_widget.lbl_fps.setText(f"FPS: {data['fps']}")
+        if 'players' in data:
+            self.telemetry_widget.lbl_players.setText(f"Players: {data['players']}")
+        if 'heap' in data:
+            self.telemetry_widget.lbl_heap.setText(f"Heap: {data['heap']}MB")
+        if 'uptime' in data:
+            self.telemetry_widget.lbl_uptime.setText(f"Uptime: {data['uptime']}")
 
     def closeEvent(self, event):
         """Gracefully signs off connection streams on escape requests."""
@@ -334,9 +359,8 @@ class MainCockpit(QMainWindow):
 
         from features.clear_pycache import clear_pycache
 
-            # Execute the cleanup script
+        # Execute the cleanup script
         try:
-            # Pass your project root directory path here
             clear_pycache('/mnt/Zero-G_Files/Zero-G_Admin_Helper')
         except Exception as e:
             print(f"[ERROR] Cleanup failed: {e}")
