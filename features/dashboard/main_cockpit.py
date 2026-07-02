@@ -20,7 +20,7 @@ class TelemetryWidget(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("TelemetryPanel")
-        self.setFixedSize(330, 50)  # Strict dimensional boundary control
+        self.setFixedSize(330, 70)  # Strict dimensional boundary control
         self.setStyleSheet("""
             QFrame#TelemetryPanel {
                 background-color: rgba(10, 15, 25, 140);
@@ -332,14 +332,20 @@ class MainCockpit(QMainWindow):
 
     def update_telemetry_ui(self, data):
         """Processes the structured dictionary received from TelemetryWorker."""
+        # DEBUG: Print the raw incoming data to terminal
+        print(f"[DEBUG] Cockpit received: {data}")
         if 'fps' in data:
             self.telemetry_widget.lbl_fps.setText(f"FPS: {data['fps']}")
+            self.telemetry_widget.lbl_fps.repaint() # Force UI refresh
         if 'players' in data:
             self.telemetry_widget.lbl_players.setText(f"Players: {data['players']}")
+            self.telemetry_widget.lbl_players.repaint()
         if 'heap' in data:
             self.telemetry_widget.lbl_heap.setText(f"Heap: {data['heap']}MB")
+            self.telemetry_widget.lbl_heap.repaint()
         if 'uptime' in data:
             self.telemetry_widget.lbl_uptime.setText(f"Uptime: {data['uptime']}")
+            self.telemetry_widget.lbl_uptime.repaint()
 
     def closeEvent(self, event):
         """Gracefully signs off connection streams on escape requests."""

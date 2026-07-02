@@ -9,7 +9,8 @@ class TelemetryParser:
         self.patterns = {
             "fps": re.compile(r"fps=([\d.]+)"),
             "heap": re.compile(r"heap=\s*(\d+)MB"),
-            "players": re.compile(r"players=\s*(\d+)") 
+            "players": re.compile(r"players=\s*(\d+)"), 
+            "uptime": re.compile(r"Uptime=([\whm]+)")
         }
 
     def parse(self, line):

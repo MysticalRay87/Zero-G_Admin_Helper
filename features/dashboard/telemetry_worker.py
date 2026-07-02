@@ -95,6 +95,7 @@ class TelemetryWorker(QThread):
                             # PARSE: Extract metrics and emit as dict
                             data = self.parser.parse(line)
                             if data:
+                                print(f"[DEBUG] Emitting Data: {data}")
                                 self.signal_data_received.emit(data)
 
                     except socket.timeout:
