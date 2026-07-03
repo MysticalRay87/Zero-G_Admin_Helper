@@ -97,10 +97,31 @@ class CommandPipe(QThread):
             time.sleep(0.3) 
             response = sock.recv(4096).decode('utf-8', errors='ignore')
             
-            if response:
-                # Emit back to MainCockpit to populate the UI console
-                self.status_msg.emit(response)
-                print(f"[SUCCESS] Server responded to: {cmd_text}")
+            # --- Response Sanitizer Filter ---
+            # Define phrases to strip from the output to keep console clean
+            to_strip = [
+                "Empyrion dedicated server",
+                "Version:",
+                "Port:",
+                "Mode:",
+                "Playfield:",
+                "Name:",
+                "Game seed:",
+                "Logged in successfully",
+            ]
+
+            sanitized_lines = []
+            for line in response.splitlines():
+                # Remove lines containing banner keywords OR lines that consist only of '=' or whitespace
+                clean_line = line.strip()
+                if not any(phrase in clean_line for phrase in to_strip) and clean_line and clean_line != "=":
+                    sanitized_lines.append(clean_line)
+            
+            sanitized_response = "\n".join(sanitized_lines)
+
+            # Emit only the sanitized (cleaned) response
+            if sanitized_response:
+                self.status_msg.emit(sanitized_response)
             
             self.command_sent.emit(cmd_text)
 

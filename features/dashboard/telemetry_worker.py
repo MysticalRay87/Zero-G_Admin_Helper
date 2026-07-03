@@ -57,6 +57,9 @@ class TelemetryWorker(QThread):
                 except socket.timeout:
                     pass
 
+                # Emit only the success status
+                self.connection_status.emit(True)
+
                 # Inject credentials to unblock the game server data pipe
                 if self.password:
                     print("[DEBUG] Injecting network validation handshake...")
@@ -84,18 +87,21 @@ class TelemetryWorker(QThread):
                             print("[DEBUG] Remote host severed the passive logging stream.")
                             break 
 
-                        # Filter out raw font tags or empty telemetry artifacts if any are sent
-                        if "currentFont" not in line:
-                            # SANITY BUFFER GUARD: Prevent binary-dump overflows
-                            if len(line) > 1024:
+                        # Pre-Parse Sanitation Gate
+                        # Filter for valid length (standard logs are < 512 chars) 
+                        # and verify it's a readable text line.
+                        if len(line) > 1024:
+                                # Discard massive binary dump
                                 continue
-
+                        
+                        # Filter out raw font tags or empty telemetry artifacts
+                        if "currentFont" not in line and "System." not in line:
+                            # SANITY BUFFER GUARD: Prevent binary-dump overflows
                             self.log_received.emit(line)
                             
                             # PARSE: Extract metrics and emit as dict
                             data = self.parser.parse(line)
                             if data:
-                                print(f"[DEBUG] Emitting Data: {data}")
                                 self.signal_data_received.emit(data)
 
                     except socket.timeout:

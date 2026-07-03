@@ -5,9 +5,9 @@ from PyQt6 import QtCore
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QGridLayout, QFrame, QLabel, QVBoxLayout, 
     QTextEdit, QHBoxLayout, QComboBox, QLineEdit, QPushButton, 
-    QTableWidget, QHeaderView, QStackedWidget, QProgressBar
+    QTableWidget, QHeaderView, QStackedWidget
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPainter, QPixmap
 
 from features.dashboard.telemetry_worker import TelemetryWorker
@@ -119,7 +119,7 @@ class MainCockpit(QMainWindow):
 
         # 2. Asynchronous Thread Operations
         self.telemetry_worker = TelemetryWorker()
-        self.telemetry_worker.log_received.connect(self.update_console_output)
+        self.telemetry_worker.log_received.connect(self.update_console)
         self.telemetry_worker.connection_status.connect(self.update_server_status, QtCore.Qt.ConnectionType.QueuedConnection)
         
         # Connect the new structured telemetry signal
@@ -136,7 +136,13 @@ class MainCockpit(QMainWindow):
         # Ensure it is stored as a member so it doesn't get garbage collected
         self.command_pipe = CommandPipe()
         self.command_pipe.start()
-        self.command_pipe.status_msg.connect(self.console.append)
+        self.command_pipe.status_msg.connect(self.handle_console_response)
+
+        self.is_first_login = True
+        self.response_buffer = []
+        self.flush_timer = QTimer()
+        self.flush_timer.setSingleShot(True)
+        self.flush_timer.timeout.connect(self._flush_console)
         
         print("[SUCCESS] Main Cockpit Dashboard initialized.")
 
@@ -225,6 +231,7 @@ class MainCockpit(QMainWindow):
         self.execute_btn = QPushButton("Execute")
         self.execute_btn.setObjectName("ExecuteButton")
         self.execute_btn.clicked.connect(self.dispatch_cmd)
+        self.cmd_input.returnPressed.connect(self.dispatch_cmd)
         
         self.input_layout.addWidget(self.cmd_input, stretch=4)
         self.input_layout.addWidget(self.execute_btn, stretch=1)
@@ -321,11 +328,20 @@ class MainCockpit(QMainWindow):
         is_console = (idx == 2)
         self.cmd_input.setVisible(is_console)
         self.execute_btn.setVisible(is_console)
-
-    def update_console_output(self, data_text):
-        """Directs logs safely onto your terminal frame."""
-        if data_text:
-            self.console.append(data_text.strip())
+    
+    def update_console(self, text, is_outbound=False, is_banner=False):
+        """Manager: Appends one atomic block at a time."""
+        # Ledger rule: Add separator ONCE for the entire block
+        self.console.append("-" * 40)
+        
+        if is_banner:
+            # Banner styling (lines before/after)
+            self.console.append(text)
+            self.console.append("-" * 40)
+        else:
+            # Command output styling
+            prefix = "[OUT] " if is_outbound else ""
+            self.console.append(f"{prefix}{text}")
 
     def load_network_config(self):
         """Loads and applies the network configuration to the UI components."""
@@ -389,16 +405,40 @@ class MainCockpit(QMainWindow):
         if cmd_text:
             # 2. Queue for safe, throttled execution (500ms delay enforced by pipe)
             if hasattr(self, 'command_pipe'):
+                self.update_console(cmd_text, is_outbound=True)
                 self.command_pipe.send_command(cmd_text)
-                
-                # 3. Provide immediate local UI feedback
-                self.console.append(f"[OUT] {cmd_text}")
                 self.cmd_input.clear()
             else:
                 self.console.append("[ERROR] CommandPipe not initialized.")
         else:
             # Handle empty input
             self.console.append("[SYSTEM] Empty command ignored.")
+
+    def handle_console_response(self, response):
+        """Signals now feed the buffer instead of the console directly."""
+        # Append the raw response (no formatting yet)
+        self.response_buffer.append(response)
+        
+        # Reset/Start the 50ms timer. If new data arrives, it resets.
+        # This effectively bundles rapid lines into one block.
+        self.flush_timer.start(50)
+
+    def _flush_console(self):
+        """This runs once after data stops arriving, processing the block as one unit."""
+        if not self.response_buffer:
+            return
+            
+        full_block = "\n".join(self.response_buffer)
+        self.response_buffer = [] # Clear for next event
+        
+        # Apply your filtering and formatting logic here
+        self.update_console(full_block)
+
+
+    # Ensure you call this reset in your error handling logic
+    def handle_pipe_error(self, err_msg):
+        self.console.append(f"[ERROR] {err_msg}")
+        self.is_first_login = True # Reset gate to allow next login message
 
     def closeEvent(self, event):
         """Gracefully signs off connection streams on escape requests."""
