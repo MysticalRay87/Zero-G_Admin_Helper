@@ -14,8 +14,8 @@ class TelemetryParser:
         }
 
     def parse(self, line):
-        """Processes a raw line and returns a dict of found metrics."""
         metrics = {}
+        # Ensure these keys match the data keys in main_cockpit.py
         for key, pattern in self.patterns.items():
             match = pattern.search(line)
             if match:

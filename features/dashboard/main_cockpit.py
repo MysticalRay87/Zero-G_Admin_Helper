@@ -5,12 +5,13 @@ from PyQt6 import QtCore
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QGridLayout, QFrame, QLabel, QVBoxLayout, 
     QTextEdit, QHBoxLayout, QComboBox, QLineEdit, QPushButton, 
-    QTableWidget, QHeaderView, QStackedWidget
+    QTableWidget, QHeaderView, QStackedWidget, QProgressBar
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPainter, QPixmap
 
 from features.dashboard.telemetry_worker import TelemetryWorker
+from features.dashboard.resource_worker import ResourcePollingWorker
 
 class TelemetryWidget(QFrame):
     """
@@ -49,8 +50,9 @@ class TelemetryWidget(QFrame):
         # --- Lower Telemetry Matrix Elements ---
         self.lbl_server_cpu = QLabel("CPU: --%", self)
         self.lbl_server_ram = QLabel("RAM: --%", self)
-        self.telemetry_layout.addWidget(self.lbl_server_cpu, 1, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        self.telemetry_layout.addWidget(self.lbl_server_ram, 1, 1, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        
+        self.telemetry_layout.addWidget(self.lbl_server_cpu, 1, 0)
+        self.telemetry_layout.addWidget(self.lbl_server_ram, 1, 1)
 
         # --- Dynamic Log Metrics Ingestion Elements ---
         self.lbl_fps = QLabel("FPS: --", self)
@@ -123,6 +125,11 @@ class MainCockpit(QMainWindow):
         self.telemetry_worker.signal_data_received.connect(self.update_telemetry_ui)
         
         self.telemetry_worker.start()
+
+        # Initialize and Start Resource Poller
+        self.resource_worker = ResourcePollingWorker()
+        self.resource_worker.signal_resources_received.connect(self.update_resource_ui)
+        self.resource_worker.start()
         
         print("[SUCCESS] Main Cockpit Dashboard initialized.")
 
@@ -346,6 +353,17 @@ class MainCockpit(QMainWindow):
         if 'uptime' in data:
             self.telemetry_widget.lbl_uptime.setText(f"Uptime: {data['uptime']}")
             self.telemetry_widget.lbl_uptime.repaint()
+
+    def update_resource_ui(self, resources):
+        # Explicit mapping
+        cpu_get = resources.get("cpu", 0.00)
+        ram = round(resources.get("ram", 0.0), 1)
+
+        cpu = f"{cpu_get:.2f}"
+        
+        # Apply to UI - no rounding, full precision
+        self.telemetry_widget.lbl_server_cpu.setText(f"CPU: {cpu}%")
+        self.telemetry_widget.lbl_server_ram.setText(f"RAM: {ram}%")
 
     def closeEvent(self, event):
         """Gracefully signs off connection streams on escape requests."""
