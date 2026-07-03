@@ -12,6 +12,7 @@ from PyQt6.QtGui import QPainter, QPixmap
 
 from features.dashboard.telemetry_worker import TelemetryWorker
 from features.dashboard.resource_worker import ResourcePollingWorker
+from features.dashboard.command_pipe import CommandPipe
 
 class TelemetryWidget(QFrame):
     """
@@ -130,6 +131,12 @@ class MainCockpit(QMainWindow):
         self.resource_worker = ResourcePollingWorker()
         self.resource_worker.signal_resources_received.connect(self.update_resource_ui)
         self.resource_worker.start()
+
+        # Initialize CommandPipe
+        # Ensure it is stored as a member so it doesn't get garbage collected
+        self.command_pipe = CommandPipe()
+        self.command_pipe.start()
+        self.command_pipe.status_msg.connect(self.console.append)
         
         print("[SUCCESS] Main Cockpit Dashboard initialized.")
 
@@ -217,6 +224,7 @@ class MainCockpit(QMainWindow):
         
         self.execute_btn = QPushButton("Execute")
         self.execute_btn.setObjectName("ExecuteButton")
+        self.execute_btn.clicked.connect(self.dispatch_cmd)
         
         self.input_layout.addWidget(self.cmd_input, stretch=4)
         self.input_layout.addWidget(self.execute_btn, stretch=1)
@@ -300,14 +308,19 @@ class MainCockpit(QMainWindow):
 
     def toggle_console_visibility(self, selected_text):
         """Pivots active visible deck layers smoothly matching dropdown choices."""
-        if selected_text == "Global Live Feed Chat":
-            self.feed_stack.setCurrentIndex(0)
-        elif selected_text == "Faction Live Feed Chat":
-            self.feed_stack.setCurrentIndex(1)
-        elif selected_text == "Admin Command Console":
-            self.feed_stack.setCurrentIndex(2)
-        elif selected_text == "Active Logs":
-            self.feed_stack.setCurrentIndex(3)
+        mapping = {
+            "Global Live Feed Chat": 0,
+            "Faction Live Feed Chat": 1,
+            "Admin Command Console": 2,
+            "Active Logs": 3
+        }
+        idx = mapping.get(selected_text, 0)
+        self.feed_stack.setCurrentIndex(idx)
+
+        # Makes Input Control Context-aware
+        is_console = (idx == 2)
+        self.cmd_input.setVisible(is_console)
+        self.execute_btn.setVisible(is_console)
 
     def update_console_output(self, data_text):
         """Directs logs safely onto your terminal frame."""
@@ -364,6 +377,28 @@ class MainCockpit(QMainWindow):
         # Apply to UI - no rounding, full precision
         self.telemetry_widget.lbl_server_cpu.setText(f"CPU: {cpu}%")
         self.telemetry_widget.lbl_server_ram.setText(f"RAM: {ram}%")
+
+    def dispatch_cmd(self):
+        """
+        Controller: Connects the GUI Input Box to the CommandPipe Buffer.
+        Ensures input is sanitized and injected into the pipeline safely.
+        """
+        # 1. Extract and sanitize input
+        cmd_text = self.cmd_input.text().strip()
+        
+        if cmd_text:
+            # 2. Queue for safe, throttled execution (500ms delay enforced by pipe)
+            if hasattr(self, 'command_pipe'):
+                self.command_pipe.send_command(cmd_text)
+                
+                # 3. Provide immediate local UI feedback
+                self.console.append(f"[OUT] {cmd_text}")
+                self.cmd_input.clear()
+            else:
+                self.console.append("[ERROR] CommandPipe not initialized.")
+        else:
+            # Handle empty input
+            self.console.append("[SYSTEM] Empty command ignored.")
 
     def closeEvent(self, event):
         """Gracefully signs off connection streams on escape requests."""

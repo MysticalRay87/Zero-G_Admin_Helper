@@ -76,7 +76,7 @@ class CommandPipe(QThread):
             sock.settimeout(5.0)
             sock.connect((self.host, int(self.port)))
 
-            # Read initial challenge/welcome banner if presented by remote host
+            # Read initial challenge/welcome banner
             try:
                 welcome = sock.recv(1024).decode('utf-8', errors='ignore')
                 print(f"[DEBUG] Remote host greeting: {welcome.strip()}")
@@ -86,14 +86,22 @@ class CommandPipe(QThread):
             # Step 1: Deliver custom authentication handshake string structure
             auth_payload = f"{self.password}\r\n"
             sock.sendall(auth_payload.encode('utf-8'))
-            time.sleep(0.1) # Brief internal processing delay before writing command
+            time.sleep(0.2) # Stabilized delay
 
-            # Step 2: Inject admin command formatted with Windows line endings (\r\n)
+            # Step 2: Inject admin command
             command_payload = f"{cmd_text}\r\n"
             sock.sendall(command_payload.encode('utf-8'))
-            print(f"[SUCCESS] Command payload successfully written to network socket: {cmd_text}")
             
-            # Broadcast validation milestone back to HUD view
+            # --- LISTENING WINDOW ---
+            # Wait for host response before closing connection
+            time.sleep(0.3) 
+            response = sock.recv(4096).decode('utf-8', errors='ignore')
+            
+            if response:
+                # Emit back to MainCockpit to populate the UI console
+                self.status_msg.emit(response)
+                print(f"[SUCCESS] Server responded to: {cmd_text}")
+            
             self.command_sent.emit(cmd_text)
 
         except Exception as e:
@@ -104,7 +112,7 @@ class CommandPipe(QThread):
         finally:
             if sock:
                 try:
-                    # Instantly enforce low-level graceful shutdown connection teardown
+                    # Graceful shutdown avoids "Aborted" errors on the host side
                     sock.shutdown(socket.SHUT_RDWR)
                     sock.close()
                     print("[DEBUG] Ephemeral channel torn down smoothly.")
