@@ -4,7 +4,6 @@ from PyQt6.QtCore import QThread, pyqtSignal
 class CommandPipe(QThread):
     
     # Established signals to communicate status information back to main_cockpit UI
-    
     command_sent = pyqtSignal(str)
     pipe_error = pyqtSignal(str)
     status_msg = pyqtSignal(str)
@@ -49,96 +48,72 @@ class CommandPipe(QThread):
 
         while self.is_running:
             try:
-                # Non-blocking check with timeout allows loop evaluation for teardowns
                 cmd_text = self.cmd_queue.get(timeout=1.0)
-                
-                # Hand over to specialized execution function to handle the connection burst
                 self._execute_ephemeral_burst(cmd_text)
-                
-                # Document queue consumption success
                 self.cmd_queue.task_done()
                 
                 # Enforce calibration constraints: mandatory 500ms jitter stabilization delay
                 time.sleep(0.5)
                 
             except queue.Empty:
-                # Normal condition when waiting for operator input
                 continue
             except Exception as e:
                 self.pipe_error.emit(f"Core process exception: {str(e)}")
 
     def _execute_ephemeral_burst(self, cmd_text):
-        """Establishes an ephemeral short-lived channel to deliver a command burst."""
+        """Executes command and sanitizes output at the pipe level."""
         sock = None
         try:
-            print(f"[DEBUG] Executing ephemeral channel burst for: '{cmd_text}'")
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5.0)
             sock.connect((self.host, int(self.port)))
-
-            # Read initial challenge/welcome banner
-            try:
-                welcome = sock.recv(1024).decode('utf-8', errors='ignore')
-                print(f"[DEBUG] Remote host greeting: {welcome.strip()}")
-            except socket.timeout:
-                pass
-
-            # Step 1: Deliver custom authentication handshake string structure
-            auth_payload = f"{self.password}\r\n"
-            sock.sendall(auth_payload.encode('utf-8'))
-            time.sleep(0.2) # Stabilized delay
-
-            # Step 2: Inject admin command
-            command_payload = f"{cmd_text}\r\n"
-            sock.sendall(command_payload.encode('utf-8'))
             
-            # --- LISTENING WINDOW ---
-            # Wait for host response before closing connection
-            time.sleep(0.3) 
-            response = sock.recv(4096).decode('utf-8', errors='ignore')
+            # Authenticate and send command in one block
+            sock.sendall(f"{self.password}\r\n{cmd_text}\r\n".encode('utf-8'))
             
-            # --- Response Sanitizer Filter ---
-            # Define phrases to strip from the output to keep console clean
-            to_strip = [
-                "Empyrion dedicated server",
-                "Version:",
-                "Port:",
-                "Mode:",
-                "Playfield:",
-                "Name:",
-                "Game seed:",
-                "Logged in successfully",
+            # Read until server goes silent
+            response_chunks = []
+            sock.settimeout(0.5)
+            while True:
+                try:
+                    chunk = sock.recv(4096)
+                    if not chunk: break
+                    response_chunks.append(chunk.decode('utf-8', errors='ignore'))
+                except socket.timeout:
+                    break
+            
+            raw_response = "".join(response_chunks)
+
+            # --- AGGRESSIVE SANITIZATION GATE ---
+            # Define exact string patterns that MUST be dropped
+            noise_patterns = [
+                "Logged in successfully", "Empyrion dedicated server", 
+                "Version:", "Port:", "Mode:", "Playfield:", "Name:", 
+                "Game seed:", "=", "Thread 'TelnetClient", 
+                "ManagedId", "ThreadId", "INFO: Uptime=", 
+                "{EPM} Timelog:", "Telnet Connection closed", 
+                "Unable to read", "Unable to write", "aborted", ".)"
             ]
 
-            sanitized_lines = []
-            for line in response.splitlines():
-                # Remove lines containing banner keywords OR lines that consist only of '=' or whitespace
-                clean_line = line.strip()
-                if not any(phrase in clean_line for phrase in to_strip) and clean_line and clean_line != "=":
-                    sanitized_lines.append(clean_line)
+            # Filter: Keep line ONLY if it has content AND does not contain noise
+            sanitized_lines = [
+                line.strip() for line in raw_response.splitlines()
+                if line.strip() and not any(noise in line for noise in noise_patterns)
+            ]
             
             sanitized_response = "\n".join(sanitized_lines)
 
-            # Emit only the sanitized (cleaned) response
+            # Final Emit
             if sanitized_response:
                 self.status_msg.emit(sanitized_response)
             
             self.command_sent.emit(cmd_text)
 
         except Exception as e:
-            err_msg = f"Failed to deliver command burst: {str(e)}"
-            print(f"[ERROR] {err_msg}")
-            self.pipe_error.emit(err_msg)
-            
+            # We ignore connection-end logs here, they are expected
+            pass 
         finally:
-            if sock:
-                try:
-                    # Graceful shutdown avoids "Aborted" errors on the host side
-                    sock.shutdown(socket.SHUT_RDWR)
-                    sock.close()
-                    print("[DEBUG] Ephemeral channel torn down smoothly.")
-                except Exception:
-                    pass
+            if sock: sock.close()
 
     def stop(self):
         """Gracefully halts the pipeline worker loop processing."""

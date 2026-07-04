@@ -81,22 +81,6 @@ class MainCockpit(QMainWindow):
         self.setWindowTitle("Zero-G Admin Helper - Main Cockpit")
         self.setFixedSize(1280, 900)
 
-        # --- Style Application ---
-        try:
-            with open("assets/ZAH.css", "r") as f:
-                self.setStyleSheet(f.read())
-            print(f"[SUCCESS] ZAH.css fully integrated.")
-        except FileNotFoundError:
-            print("[WARNING] ZAH.css not found. Skipping theme application.")
-            self.setStyleSheet("""
-                QFrame { background-color: rgba(15, 25, 35, 180); border: 1px solid #00d4ff; border-radius: 5px; }
-                QLabel { background-color: transparent; border: none; color: #00d4ff; font-weight: bold; }
-                QTextEdit, QTableWidget { background-color: rgba(10, 15, 25, 200); color: #e0e0e0; border: 1px solid #005577; }
-                QHeaderView::section { background-color: rgba(20, 30, 45, 220); color: #00d4ff; }
-                QPushButton { background-color: rgba(0, 85, 119, 150); color: #ffffff; border: 1px solid #00d4ff; }
-                QPushButton:hover { background-color: rgba(0, 150, 200, 200); }
-            """)
-        
         # --- Central UI Canvas ---
         self.central_widget = QWidget()
         self.central_widget.setObjectName("CentralWidgetCanvas")
@@ -143,6 +127,9 @@ class MainCockpit(QMainWindow):
         self.flush_timer = QTimer()
         self.flush_timer.setSingleShot(True)
         self.flush_timer.timeout.connect(self._flush_console)
+
+        # Initialize themes
+        self.apply_theme()
         
         print("[SUCCESS] Main Cockpit Dashboard initialized.")
 
@@ -156,6 +143,17 @@ class MainCockpit(QMainWindow):
             scaled_bg = self.background.scaled(self.size(), Qt.AspectRatioMode.IgnoreAspectRatio)
             painter.drawPixmap(0, 0, scaled_bg)
         painter.end()
+
+    def apply_theme(self):
+        """Loads external CSS to keep Python code purely structural."""
+        try:
+            # Assumes main_cockpit.py is in features/dashboard/
+            # Path goes: up to features/, up to root/
+            css_path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'ZAH.css')
+            with open(css_path, "r") as f:
+                self.setStyleSheet(f.read())
+        except Exception as e:
+            print(f"[ERROR] Could not load stylesheet: {e}")
     
     def setup_zones(self):
         """
@@ -331,11 +329,9 @@ class MainCockpit(QMainWindow):
     
     def update_console(self, text, is_outbound=False, is_banner=False):
         """Manager: Appends one atomic block at a time."""
-        # Ledger rule: Add separator ONCE for the entire block
-        self.console.append("-" * 40)
-        
+               
         if is_banner:
-            # Banner styling (lines before/after)
+            # Banner styling (lines after)
             self.console.append(text)
             self.console.append("-" * 40)
         else:
@@ -415,13 +411,40 @@ class MainCockpit(QMainWindow):
             self.console.append("[SYSTEM] Empty command ignored.")
 
     def handle_console_response(self, response):
-        """Signals now feed the buffer instead of the console directly."""
-        # Append the raw response (no formatting yet)
-        self.response_buffer.append(response)
+        """
+        The Master Gatekeeper.
+        - Suppresses all diagnostic noise.
+        - Ensures the login banner is only displayed ONCE.
+        """
+        # 1. Define noise patterns to discard
+        noise_triggers = [
+            "Thread 'TelnetClient", "ManagedId", "ThreadId",
+            "INFO: Uptime=", "{EPM} Timelog:", "Telnet Connection",
+            "Unable to read", "Unable to write", "aborted", ".)"
+        ]
         
-        # Reset/Start the 50ms timer. If new data arrives, it resets.
-        # This effectively bundles rapid lines into one block.
-        self.flush_timer.start(50)
+        # 2. Check for the login banner
+        is_banner = "Empyrion dedicated server" in response
+        
+        if is_banner:
+            if not self.is_first_login:
+                return # Gate is closed: Ignore repeated banners
+            self.is_first_login = False
+            # Allow the banner through once
+            sanitized_block = response.strip()
+        else:
+            # Command output: strict noise filtering
+            lines = response.splitlines()
+            filtered_lines = [
+                line.strip() for line in lines 
+                if line.strip() and not any(noise in line for noise in noise_triggers)
+            ]
+            sanitized_block = "\n".join(filtered_lines)
+        
+        # 3. Buffer and Flush
+        if sanitized_block:
+            self.response_buffer.append(sanitized_block)
+            self.flush_timer.start(50)
 
     def _flush_console(self):
         """This runs once after data stops arriving, processing the block as one unit."""
