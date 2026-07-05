@@ -91,7 +91,7 @@ def main():
 
         loader.deleteLater()
 
-    # PHASE 0: Network Check (The first gate)
+    # PHASE 2: Network Check (The first gate)
     from features.network.connection import is_network_ready, NetworkWizardOverlay
 
     if not is_network_ready():
@@ -108,10 +108,11 @@ def main():
         wizard.exec()
     else:
         print("[STATUS] All initialization gates clear. Spinning up master core cockpit dashboard view...")
+        
+        # Instantiate MainCockpit using original signature (no args)
         if loader.result() == QDialog.DialogCode.Accepted:
             print("[SUCCESS] Loading sequence complete. Launching Main Cockpit.")
 
-            # Instantiate and show the main dashboard
             main_cockpit = MainCockpit()
             main_cockpit.show()
 

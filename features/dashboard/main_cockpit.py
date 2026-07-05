@@ -105,10 +105,12 @@ class MainCockpit(QMainWindow):
         self.telemetry_worker = TelemetryWorker()
         self.telemetry_worker.log_received.connect(self.update_console)
         self.telemetry_worker.connection_status.connect(self.update_server_status, QtCore.Qt.ConnectionType.QueuedConnection)
-        
-        # Connect the new structured telemetry signal
-        self.telemetry_worker.signal_data_received.connect(self.update_telemetry_ui)
-        
+        self.telemetry_worker.signal_metrics.connect(self.update_telemetry_ui)
+        if hasattr(self.telemetry_worker, 'signal_global_chat'):
+            self.telemetry_worker.signal_global_chat.connect(self.update_console)
+        if hasattr(self.telemetry_worker, 'signal_faction_chat'):
+            self.telemetry_worker.signal_faction_chat.connect(self.update_console)     
+           
         self.telemetry_worker.start()
 
         # Initialize and Start Resource Poller
