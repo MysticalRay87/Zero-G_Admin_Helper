@@ -109,11 +109,11 @@ class CommandPipe(QThread):
             
             self.command_sent.emit(cmd_text)
 
-        except Exception as e:
-            # We ignore connection-end logs here, they are expected
-            pass 
+        except (socket.timeout, socket.error) as e:
+            self.pipe_error.emit(f"Pipe connection failed: {e}")
         finally:
-            if sock: sock.close()
+            if sock: 
+                sock.close()
 
     def stop(self):
         """Gracefully halts the pipeline worker loop processing."""

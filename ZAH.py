@@ -3,6 +3,7 @@ import sys
 from PyQt6.QtWidgets import QApplication, QDialog
 from PyQt6.QtCore import QEventLoop, QCoreApplication
 
+# Internal imports for registry modules
 from features.network.connection import is_network_ready
 from features.dashboard.main_cockpit import MainCockpit
 
@@ -61,63 +62,44 @@ def main():
     # -------------------------------------------------------------------
 
     # PHASE 1. Initial Environment Synchronization
-    # The ApplicationLoader now internalizes the LoginWindow gate at 30%.
     if ApplicationLoader is not None:
         print("[DEBUG] Instantiating Screen 1: Application Splash Loader Canvas...")
         loader = ApplicationLoader()
         loader.start_boot_sequence()
-        # Block until finished. Loader handles login internally.
+        # Block until finished. Loader handles login/onboarding internal gating.
         loader_result = loader.exec()
 
-        # NAVIGATION HUB: Inspect intent from the LoginWindow instance held by loader
-        # (Assuming loader stores a reference to the login window or state)
-        # For now, we route based on the result of the loader chain
-        if loader_result == QDialog.DialogCode.Accepted:
-            print("[SUCCESS] All initialization gates clear. Spinning up master core cockpit dashboard view...")
-
-        # If the user requested onboarding during the loader phase:
-        elif hasattr(loader, 'onboarding_requested') and loader.onboarding_requested:
-            if AccountOnboardingWizard is not None:
-                print("[DEBUG] Instantiating Screen 2: Account Onboarding Wizard Canvas...")
-                wizard = AccountOnboardingWizard(parent=None)
-                QCoreApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
-                wizard.exec()
-            else:
-                print("[ERROR] Wizard missing.")
-                sys.exit(1)
-        else:
-            print("[STATUS] User exited or auth failed. Shutting down.")
-            sys.exit(0)
-
+        # Clean up loader instance
         loader.deleteLater()
+    else:
+        print("[ERROR] ApplicationLoader not found. Halting.")
+        sys.exit(1)
 
-    # PHASE 2: Network Check (The first gate)
-    from features.network.connection import is_network_ready, NetworkWizardOverlay
+    # PHASE 2: Network Verification Gate
+    from features.network.connection import NetworkWizardOverlay
 
     if not is_network_ready():
         print("[STATUS] Network unreachable. Launching Network Wizard...")
         network_wizard = NetworkWizardOverlay()
         if network_wizard.exec() != QDialog.DialogCode.Accepted:
-            sys.exit(0)  # Exit if wizard canceled
+            sys.exit(0)  # Exit if user cancels network setup
     else:
         print("[SUCCESS] Network verified.")
 
-    # PHASE 3: Launch Primary System Administration Dashboard Frame
-    if loader.onboarding_requested and AccountOnboardingWizard:
-        wizard = AccountOnboardingWizard()
-        wizard.exec()
-    else:
-        print("[STATUS] All initialization gates clear. Spinning up master core cockpit dashboard view...")
+    # PHASE 3: Dashboard Handoff
+    # Logic: Only proceed to MainCockpit if the previous gates (Loader/Network) 
+    # concluded with an 'Accepted' signal.
+    if loader_result == QDialog.DialogCode.Accepted:
+        print("[SUCCESS] Loading sequence complete. Launching Main Cockpit.")
         
-        # Instantiate MainCockpit using original signature (no args)
-        if loader.result() == QDialog.DialogCode.Accepted:
-            print("[SUCCESS] Loading sequence complete. Launching Main Cockpit.")
+        main_cockpit = MainCockpit()
+        main_cockpit.show()
 
-            main_cockpit = MainCockpit()
-            main_cockpit.show()
-
-            # Keep the application alive
-            sys.exit(app.exec())
+        # Hand off control to the Main Dashboard event loop
+        sys.exit(app.exec())
+    else:
+        print("[STATUS] Initialization halted. Shutting down.")
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()

@@ -68,40 +68,34 @@ class TelemetryWidget(QFrame):
 
 
 class MainCockpit(QMainWindow):
-    """
-    Screen 3: Main Administration Cockpit Dashboard.
+    """ Screen 3: Main Administration Cockpit Dashboard.
     Persistent multi-threaded dashboard featuring a fluid layout-retaining data feed engine.
     """
     def __init__(self, parent=None):
         super().__init__(parent)
 
         self.setObjectName("MainCockpitCanvas")
-
-        # --- Dashboard Configuration ---
-        self.setWindowTitle("Zero-G Admin Helper - Main Cockpit")
+        self.setWindowTitle("Zero-G Admin Helper - Dashboard")
         self.setFixedSize(1280, 900)
 
-        # --- Central UI Canvas ---
+        # 1. --- Central UI Canvas ---
         self.central_widget = QWidget()
         self.central_widget.setObjectName("CentralWidgetCanvas")
         self.setCentralWidget(self.central_widget)
         self.background = QPixmap("assets/backgrounds/background.png")
 
-        # --- Master Layout Definition ---
+        # 2. --- Master Layout & Scaffolding ---
         self.master_layout = QHBoxLayout()
         self.master_layout.setContentsMargins(90, 205, 90, 95) 
         self.master_layout.setSpacing(15)
         self.central_widget.setLayout(self.master_layout)
 
-        # --- Core Standalone Telemetry Component Allocation ---
-        self.telemetry_widget = TelemetryWidget(self)
-        self.telemetry_widget.move(850, 120)
-        self.telemetry_widget.show()
-
-        # 1. Grid Layout Construction
+        # 3. Grid Layout Construction
         self.setup_zones()
+        self.setup_chat_interface()
 
-        # 2. Asynchronous Thread Operations
+        # 4. Telemetry Component Allocation (Must follow grid definition if integrated)
+        # Only instantiate and show if it is NOT managed by setup_zones grid
         self.telemetry_worker = TelemetryWorker()
         self.telemetry_worker.log_received.connect(self.update_console)
         self.telemetry_worker.connection_status.connect(self.update_server_status, QtCore.Qt.ConnectionType.QueuedConnection)
@@ -110,53 +104,47 @@ class MainCockpit(QMainWindow):
             self.telemetry_worker.signal_global_chat.connect(self.update_console)
         if hasattr(self.telemetry_worker, 'signal_faction_chat'):
             self.telemetry_worker.signal_faction_chat.connect(self.update_console)     
-           
-        self.telemetry_worker.start()
 
-        # Initialize and Start Resource Poller
-        self.resource_worker = ResourcePollingWorker()
-        self.resource_worker.signal_resources_received.connect(self.update_resource_ui)
-        self.resource_worker.start()
+        # 5. --- Core Standalone Telemetry Component Allocation ---
+        self.telemetry_widget = TelemetryWidget(self)
+        self.telemetry_widget.move(850, 120)
+        self.telemetry_widget.show()
 
-        # Initialize CommandPipe
-        # Ensure it is stored as a member so it doesn't get garbage collected
+        # 6. --- Command & Resource Subsystems ---
+
+        # 6A. ---Initialize CommandPipe ---
+        # Ensure it doesn't get garbage collected
         self.command_pipe = CommandPipe()
-        self.command_pipe.start()
         self.command_pipe.status_msg.connect(self.handle_console_response)
 
+        # 6B. --- Initialize and Start Resource Poller ---
+        self.resource_worker = ResourcePollingWorker()
+        self.resource_worker.signal_resources_received.connect(self.update_resource_ui)
+
+        # 7. --- Panel Binder ---
+        self.setup_chat_panels()
+
+        # 8. --- Start Workers ---
+        self.telemetry_worker.start()
+        self.command_pipe.start()
+        self.resource_worker.start()
+
+
+        # 9. --- Console Buffer Management ---
         self.is_first_login = True
         self.response_buffer = []
         self.flush_timer = QTimer()
         self.flush_timer.setSingleShot(True)
         self.flush_timer.timeout.connect(self._flush_console)
 
-        # Initialize themes
+        # 10. --- Initialize themes ---
         self.apply_theme()
         
         print("[SUCCESS] Main Cockpit Dashboard initialized.")
 
-        # 3. Dynamic Configuration Loading
+        # 11. --- Dynamic Configuration Loading ---
         self.load_network_config()
 
-    def paintEvent(self, event):
-        """Force background canvas visualization mapping."""
-        painter = QPainter(self)
-        if not self.background.isNull():
-            scaled_bg = self.background.scaled(self.size(), Qt.AspectRatioMode.IgnoreAspectRatio)
-            painter.drawPixmap(0, 0, scaled_bg)
-        painter.end()
-
-    def apply_theme(self):
-        """Loads external CSS to keep Python code purely structural."""
-        try:
-            # Assumes main_cockpit.py is in features/dashboard/
-            # Path goes: up to features/, up to root/
-            css_path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'ZAH.css')
-            with open(css_path, "r") as f:
-                self.setStyleSheet(f.read())
-        except Exception as e:
-            print(f"[ERROR] Could not load stylesheet: {e}")
-    
     def setup_zones(self):
         """
         Constructs Left Column (Communications Core via Card Stack) 
@@ -226,7 +214,7 @@ class MainCockpit(QMainWindow):
         self.input_layout = QHBoxLayout()
         self.cmd_input = QLineEdit()
         self.cmd_input.setObjectName("CommandInput")
-        self.cmd_input.setPlaceholderText("Enter Chat or Admin Command...")
+        self.cmd_input.setPlaceholderText("Enter Admin Command...")
         
         self.execute_btn = QPushButton("Execute")
         self.execute_btn.setObjectName("ExecuteButton")
@@ -313,6 +301,63 @@ class MainCockpit(QMainWindow):
         self.master_layout.addLayout(self.master_vertical_layout)
         print("[SUCCESS] Main Cockpit grid initialized.")
 
+    def setup_chat_interface(self):
+        # The Stack Container
+        self.chat_stack = QStackedWidget()
+        
+        # The two chat screens
+        self.global_chat_display = QTextEdit()
+        self.faction_chat_display = QTextEdit()
+        
+        # Add to stack
+        self.chat_stack.addWidget(self.global_chat_display)
+        self.chat_stack.addWidget(self.faction_chat_display)
+        
+        # Input Area (Pinned to bottom of this stack)
+        self.chat_input = QLineEdit()
+        self.send_btn = QPushButton("SEND")
+
+    def setup_chat_panels(self):
+        """
+        Initializes the chat UI panels and binds them to the TelemetryWorker signals.
+        """
+        # Create UI components
+        self.global_chat_display = QTextEdit()
+        self.faction_chat_display = QTextEdit()
+        
+        # Apply CSS IDs for styling
+        self.global_chat_display.setObjectName("ChatPanelGlobal")
+        self.faction_chat_display.setObjectName("ChatPanelFaction")
+        
+        # Read-only configuration
+        self.global_chat_display.setReadOnly(True)
+        self.faction_chat_display.setReadOnly(True)
+
+        # Connect signals from the worker thread to the UI slots
+        self.telemetry_worker.signal_global_chat.connect(self.handle_global_chat)
+        self.telemetry_worker.signal_faction_chat.connect(self.handle_faction_chat)
+
+    # --- System UI & Styling ---
+
+    def paintEvent(self, event):
+        """Force background canvas visualization mapping."""
+        painter = QPainter(self)
+        if not self.background.isNull():
+            scaled_bg = self.background.scaled(self.size(), Qt.AspectRatioMode.IgnoreAspectRatio)
+            painter.drawPixmap(0, 0, scaled_bg)
+        painter.end()
+
+    def apply_theme(self):
+        """Loads external CSS to keep Python code purely structural."""
+        try:
+            # Assumes main_cockpit.py is in features/dashboard/
+            # Path goes: up to features/, up to root/
+            css_path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'ZAH.css')
+            with open(css_path, "r") as f:
+                self.setStyleSheet(f.read())
+        except Exception as e:
+            print(f"[ERROR] Could not load stylesheet: {e}")
+
     def toggle_console_visibility(self, selected_text):
         """Pivots active visible deck layers smoothly matching dropdown choices."""
         mapping = {
@@ -329,31 +374,7 @@ class MainCockpit(QMainWindow):
         self.cmd_input.setVisible(is_console)
         self.execute_btn.setVisible(is_console)
     
-    def update_console(self, text, is_outbound=False, is_banner=False):
-        """Manager: Appends one atomic block at a time."""
-               
-        if is_banner:
-            # Banner styling (lines after)
-            self.console.append(text)
-            self.console.append("-" * 40)
-        else:
-            # Command output styling
-            prefix = "[OUT] " if is_outbound else ""
-            self.console.append(f"{prefix}{text}")
-
-    def load_network_config(self):
-        """Loads and applies the network configuration to the UI components."""
-        config_path = "data/server_config.json"
-        
-        if os.path.exists(config_path):
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-                ip = config.get("input_ip", "Unknown")
-                
-                # Update the label inside the new detached telemetry widget
-                self.telemetry_widget.lbl_target_ip.setText(f"Target IP: {ip}")
-        else:
-            self.telemetry_widget.lbl_target_ip.setText("Target IP: Not Configured")
+    # --- Telemetry & Data Processing ---
 
     def update_server_status(self, is_online):
         """Toggles real-time network presence alerts."""
@@ -391,6 +412,81 @@ class MainCockpit(QMainWindow):
         # Apply to UI - no rounding, full precision
         self.telemetry_widget.lbl_server_cpu.setText(f"CPU: {cpu}%")
         self.telemetry_widget.lbl_server_ram.setText(f"RAM: {ram}%")
+
+    def update_console(self, text, is_outbound=False, is_banner=False):
+        """Manager: Appends one atomic block at a time."""
+               
+        if is_banner:
+            # Banner styling (lines after)
+            self.console.append(text)
+            self.console.append("-" * 40)
+        else:
+            # Command output styling
+            prefix = "[OUT] " if is_outbound else ""
+            self.console.append(f"{prefix}{text}")
+
+    def _flush_console(self):
+        """This runs once after data stops arriving, processing the block as one unit."""
+        if not self.response_buffer:
+            return
+            
+        full_block = "\n".join(self.response_buffer)
+        self.response_buffer = [] # Clear for next event
+        
+        # Apply your filtering and formatting logic here
+        self.update_console(full_block)
+
+    def handle_global_chat(self, message):
+        """Slot to receive and display global chat messages."""
+        if hasattr(self, 'global_chat_display'):
+            self.global_chat_display.append(message)
+            # Auto-scroll to the newest message
+            sb = self.global_chat_display.verticalScrollBar()
+            sb.setValue(sb.maximum())
+
+    def handle_faction_chat(self, message):
+        """Slot to receive and display faction chat messages."""
+        if hasattr(self, 'faction_chat_display'):
+            self.faction_chat_display.append(message)
+            # Auto-scroll
+            sb = self.faction_chat_display.verticalScrollBar()
+            sb.setValue(sb.maximum())
+
+    def switch_chat_tab(self, tab_index):
+            """Switches the visible chat box using the stacked widget index."""
+            self.chat_stack.setCurrentIndex(tab_index)
+            # Update button styles here to show which one is active
+
+    # --- Command Execution ---
+
+    def on_execute_clicked(self):
+        """
+        Gathers text from the input field, prefixes it based on the active
+        chat tab, and pushes it to the CommandPipe for asynchronous delivery.
+        """
+        text = self.cmd_input.text().strip()
+        if not text:
+            return  # Prevent empty command injection
+
+        # Determine target based on the active QStackedWidget index
+        # Assuming index 0 = Global, index 1 = Faction
+        current_index = self.chat_stack.currentIndex()
+        
+        if current_index == 0:
+            command = f'say "{text}"'
+        elif current_index == 1:
+            command = f'faction say "{text}"'
+        else:
+            # Fallback/Safety: If no tab is active or selected, default to global
+            command = f'say "{text}"'
+        
+        # Dispatch to CommandPipe (Thread-safe)
+        if hasattr(self, 'command_pipe'):
+            self.command_pipe.cmd_queue.put(command)
+            self.cmd_input.clear()
+            print(f"[DEBUG] Command Dispatched: {command}")
+        else:
+            print("[ERROR] CommandPipe not initialized.")
 
     def dispatch_cmd(self):
         """
@@ -448,22 +544,29 @@ class MainCockpit(QMainWindow):
             self.response_buffer.append(sanitized_block)
             self.flush_timer.start(50)
 
-    def _flush_console(self):
-        """This runs once after data stops arriving, processing the block as one unit."""
-        if not self.response_buffer:
-            return
-            
-        full_block = "\n".join(self.response_buffer)
-        self.response_buffer = [] # Clear for next event
-        
-        # Apply your filtering and formatting logic here
-        self.update_console(full_block)
+    # --- Error Handling ---
 
-
-    # Ensure you call this reset in your error handling logic
     def handle_pipe_error(self, err_msg):
         self.console.append(f"[ERROR] {err_msg}")
-        self.is_first_login = True # Reset gate to allow next login message
+        self.is_first_login = True # Reset gate to allow next login message   
+
+    # --- Network Handling ---
+
+    def load_network_config(self):
+        """Loads and applies the network configuration to the UI components."""
+        config_path = "data/server_config.json"
+        
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+                ip = config.get("input_ip", "Unknown")
+                
+                # Update the label inside the new detached telemetry widget
+                self.telemetry_widget.lbl_target_ip.setText(f"Target IP: {ip}")
+        else:
+            self.telemetry_widget.lbl_target_ip.setText("Target IP: Not Configured")
+
+    # --- Close & Shutdown ---
 
     def closeEvent(self, event):
         """Gracefully signs off connection streams on escape requests."""
