@@ -19,6 +19,7 @@ class TelemetryWidget(QFrame):
     Standalone high-density sub-panel managing server health metrics.
     Abstracted component for precision placement inside header controls.
     """
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("TelemetryPanel")
@@ -92,23 +93,21 @@ class MainCockpit(QMainWindow):
 
         # 3. Grid Layout Construction
         self.setup_zones()
-        self.setup_chat_interface()
 
         # 4. Telemetry Component Allocation (Must follow grid definition if integrated)
-        # Only instantiate and show if it is NOT managed by setup_zones grid
         self.telemetry_worker = TelemetryWorker()
         self.telemetry_worker.log_received.connect(self.update_console)
         self.telemetry_worker.connection_status.connect(self.update_server_status, QtCore.Qt.ConnectionType.QueuedConnection)
         self.telemetry_worker.signal_metrics.connect(self.update_telemetry_ui)
-        if hasattr(self.telemetry_worker, 'signal_global_chat'):
-            self.telemetry_worker.signal_global_chat.connect(self.update_console)
-        if hasattr(self.telemetry_worker, 'signal_faction_chat'):
-            self.telemetry_worker.signal_faction_chat.connect(self.update_console)     
+
+        self.telemetry_worker.signal_global_chat.connect(self.handle_global_chat)
+        self.telemetry_worker.signal_faction_chat.connect(self.handle_faction_chat)     
 
         # 5. --- Core Standalone Telemetry Component Allocation ---
         self.telemetry_widget = TelemetryWidget(self)
         self.telemetry_widget.move(850, 120)
         self.telemetry_widget.show()
+        self.telemetry_worker.start()
 
         # 6. --- Command & Resource Subsystems ---
 
@@ -116,33 +115,31 @@ class MainCockpit(QMainWindow):
         # Ensure it doesn't get garbage collected
         self.command_pipe = CommandPipe()
         self.command_pipe.status_msg.connect(self.handle_console_response)
+        self.command_pipe.start()
+       
 
         # 6B. --- Initialize and Start Resource Poller ---
         self.resource_worker = ResourcePollingWorker()
         self.resource_worker.signal_resources_received.connect(self.update_resource_ui)
-
-        # 7. --- Panel Binder ---
-        self.setup_chat_panels()
-
-        # 8. --- Start Workers ---
-        self.telemetry_worker.start()
-        self.command_pipe.start()
         self.resource_worker.start()
 
+        # 7. --- Panel Binder ---
+        self.global_chat_display = self.global_chat_box
+        self.faction_chat_display = self.faction_chat_box
 
-        # 9. --- Console Buffer Management ---
+        # 8. --- Console Buffer Management ---
         self.is_first_login = True
         self.response_buffer = []
         self.flush_timer = QTimer()
         self.flush_timer.setSingleShot(True)
         self.flush_timer.timeout.connect(self._flush_console)
 
-        # 10. --- Initialize themes ---
+        # 9. --- Initialize themes ---
         self.apply_theme()
         
         print("[SUCCESS] Main Cockpit Dashboard initialized.")
 
-        # 11. --- Dynamic Configuration Loading ---
+        # 10. --- Dynamic Configuration Loading ---
         self.load_network_config()
 
     def setup_zones(self):
@@ -214,7 +211,7 @@ class MainCockpit(QMainWindow):
         self.input_layout = QHBoxLayout()
         self.cmd_input = QLineEdit()
         self.cmd_input.setObjectName("CommandInput")
-        self.cmd_input.setPlaceholderText("Enter Admin Command...")
+        self.cmd_input.setPlaceholderText("Enter Chat Message or Admin Command...")
         
         self.execute_btn = QPushButton("Execute")
         self.execute_btn.setObjectName("ExecuteButton")
@@ -300,42 +297,6 @@ class MainCockpit(QMainWindow):
         # Re-apply the combined layout parameters cleanly onto your central workspace
         self.master_layout.addLayout(self.master_vertical_layout)
         print("[SUCCESS] Main Cockpit grid initialized.")
-
-    def setup_chat_interface(self):
-        # The Stack Container
-        self.chat_stack = QStackedWidget()
-        
-        # The two chat screens
-        self.global_chat_display = QTextEdit()
-        self.faction_chat_display = QTextEdit()
-        
-        # Add to stack
-        self.chat_stack.addWidget(self.global_chat_display)
-        self.chat_stack.addWidget(self.faction_chat_display)
-        
-        # Input Area (Pinned to bottom of this stack)
-        self.chat_input = QLineEdit()
-        self.send_btn = QPushButton("SEND")
-
-    def setup_chat_panels(self):
-        """
-        Initializes the chat UI panels and binds them to the TelemetryWorker signals.
-        """
-        # Create UI components
-        self.global_chat_display = QTextEdit()
-        self.faction_chat_display = QTextEdit()
-        
-        # Apply CSS IDs for styling
-        self.global_chat_display.setObjectName("ChatPanelGlobal")
-        self.faction_chat_display.setObjectName("ChatPanelFaction")
-        
-        # Read-only configuration
-        self.global_chat_display.setReadOnly(True)
-        self.faction_chat_display.setReadOnly(True)
-
-        # Connect signals from the worker thread to the UI slots
-        self.telemetry_worker.signal_global_chat.connect(self.handle_global_chat)
-        self.telemetry_worker.signal_faction_chat.connect(self.handle_faction_chat)
 
     # --- System UI & Styling ---
 
@@ -436,18 +397,20 @@ class MainCockpit(QMainWindow):
         # Apply your filtering and formatting logic here
         self.update_console(full_block)
 
-    def handle_global_chat(self, message):
+    # --- Chat Handler ---
+
+    def handle_global_chat(self, data: dict):
         """Slot to receive and display global chat messages."""
         if hasattr(self, 'global_chat_display'):
-            self.global_chat_display.append(message)
+            self.global_chat_display.append(f"[GLOBAL] {data['player']}: {data['message']}")
             # Auto-scroll to the newest message
             sb = self.global_chat_display.verticalScrollBar()
             sb.setValue(sb.maximum())
 
-    def handle_faction_chat(self, message):
+    def handle_faction_chat(self, data: dict):
         """Slot to receive and display faction chat messages."""
         if hasattr(self, 'faction_chat_display'):
-            self.faction_chat_display.append(message)
+            self.faction_chat_display.append(f"[FACTION] ({data['faction']}) {data['player']}: {data['message']}")
             # Auto-scroll
             sb = self.faction_chat_display.verticalScrollBar()
             sb.setValue(sb.maximum())
@@ -459,87 +422,77 @@ class MainCockpit(QMainWindow):
 
     # --- Command Execution ---
 
-    def on_execute_clicked(self):
-        """
-        Gathers text from the input field, prefixes it based on the active
-        chat tab, and pushes it to the CommandPipe for asynchronous delivery.
-        """
-        text = self.cmd_input.text().strip()
-        if not text:
-            return  # Prevent empty command injection
-
-        # Determine target based on the active QStackedWidget index
-        # Assuming index 0 = Global, index 1 = Faction
-        current_index = self.chat_stack.currentIndex()
-        
-        if current_index == 0:
-            command = f'say "{text}"'
-        elif current_index == 1:
-            command = f'faction say "{text}"'
-        else:
-            # Fallback/Safety: If no tab is active or selected, default to global
-            command = f'say "{text}"'
-        
-        # Dispatch to CommandPipe (Thread-safe)
-        if hasattr(self, 'command_pipe'):
-            self.command_pipe.cmd_queue.put(command)
-            self.cmd_input.clear()
-            print(f"[DEBUG] Command Dispatched: {command}")
-        else:
-            print("[ERROR] CommandPipe not initialized.")
-
     def dispatch_cmd(self):
         """
         Controller: Connects the GUI Input Box to the CommandPipe Buffer.
-        Ensures input is sanitized and injected into the pipeline safely.
+        Context-aware: Automatically prepends the correct chat syntax based on the active tab.
         """
-        # 1. Extract and sanitize input
-        cmd_text = self.cmd_input.text().strip()
+        text = self.cmd_input.text().strip()
         
-        if cmd_text:
-            # 2. Queue for safe, throttled execution (500ms delay enforced by pipe)
-            if hasattr(self, 'command_pipe'):
-                self.update_console(cmd_text, is_outbound=True)
-                self.command_pipe.send_command(cmd_text)
-                self.cmd_input.clear()
-            else:
-                self.console.append("[ERROR] CommandPipe not initialized.")
+        # Determine target based on the active QStackedWidget index (self.feed_stack)
+        current_idx = self.feed_stack.currentIndex()
+        
+        if current_idx == 0:
+            command = f"say '{text}'\n"         # Tab 0: Global Chat
+        elif current_idx == 1:
+            command = f"faction say '{text}'\n" # Tab 1: Faction Chat
+        elif current_idx == 2:
+            command = text                    # Tab 2: Direct Admin Console
         else:
-            # Handle empty input
-            self.console.append("[SYSTEM] Empty command ignored.")
+            command = text                    # Tab 3: Logs
+
+        if not text:
+            self.update_console("[SYSTEM] Empty command ignored.")
+            return
+            
+        # Queue for safe, throttled execution (500ms delay enforced by pipe)
+        if hasattr(self, 'command_pipe'):
+            self.update_console(command, is_outbound=True)
+            self.command_pipe.send_command(command)
+            self.cmd_input.clear()
+        else:
+            self.console.append("[ERROR] CommandPipe not initialized.")
 
     def handle_console_response(self, response):
         """
         The Master Gatekeeper.
-        - Suppresses all diagnostic noise.
-        - Ensures the login banner is only displayed ONCE.
+        Dynamically strips login banners and network noise from CommandPipe responses
+        without destroying raw command text formatting.
         """
-        # 1. Define noise patterns to discard
+        # Strict low-level system junk to block
         noise_triggers = [
             "Thread 'TelnetClient", "ManagedId", "ThreadId",
-            "INFO: Uptime=", "{EPM} Timelog:", "Telnet Connection",
-            "Unable to read", "Unable to write", "aborted", ".)"
+            "Unable to read", "Unable to write", "aborted", ".)",
+            "Connected from", "Welcome to Empyrion"
         ]
         
-        # 2. Check for the login banner
-        is_banner = "Empyrion dedicated server" in response
+        # Dedicated login banner lines to block
+        banner_elements = [
+            "Empyrion dedicated server", "Version:", "Port:", 
+            "Mode:", "Playfield:", "Name:", "Game seed:"
+        ]
         
-        if is_banner:
-            if not self.is_first_login:
-                return # Gate is closed: Ignore repeated banners
-            self.is_first_login = False
-            # Allow the banner through once
-            sanitized_block = response.strip()
-        else:
-            # Command output: strict noise filtering
-            lines = response.splitlines()
-            filtered_lines = [
-                line.strip() for line in lines 
-                if line.strip() and not any(noise in line for noise in noise_triggers)
-            ]
-            sanitized_block = "\n".join(filtered_lines)
+        lines = response.splitlines()
+        filtered_lines = []
         
-        # 3. Buffer and Flush
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+                
+            # Drop low-level system thread noise
+            if any(noise in stripped for noise in noise_triggers):
+                continue
+                
+            # Drop the initial connection banner components
+            if any(element in stripped for element in banner_elements):
+                continue
+                
+            # If it passes the gate, we keep it exactly as-is
+            filtered_lines.append(stripped)
+            
+        sanitized_block = "\n".join(filtered_lines)
+        
         if sanitized_block:
             self.response_buffer.append(sanitized_block)
             self.flush_timer.start(50)

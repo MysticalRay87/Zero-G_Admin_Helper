@@ -1,10 +1,14 @@
 import json
 import os
 import socket
+import select
 import time
+import threading
 from PyQt6.QtCore import QThread, pyqtSignal
 from features.dashboard.telemetry_parser import TelemetryParser
 from enum import Enum
+
+telemetry_lock = threading.Lock()
 
 class WorkerState(Enum):
     DISCONNECTED = 0
@@ -17,8 +21,8 @@ class TelemetryWorker(QThread):
     # Establish signals to communicate data pulses back to the main cockpit UI
     log_received = pyqtSignal(str)
     connection_status = pyqtSignal(bool)
-    signal_global_chat = pyqtSignal(str)
-    signal_faction_chat = pyqtSignal(str)
+    signal_global_chat = pyqtSignal(dict)
+    signal_faction_chat = pyqtSignal(dict)
     signal_metrics = pyqtSignal(dict)
 
     def __init__(self, config_path="data/server_config.json"):
@@ -133,55 +137,69 @@ class TelemetryWorker(QThread):
     def _perform_streaming(self):
         """
         Manages the high-speed passive stream reading and signal emission.
+        Uses non-blocking multiplexing to allow safe interface shutdown.
         Returns True while streaming, False if the stream is broken.
         """
         try:
-            # Create a buffered stream for line-by-line reading
+            # Create the buffered text stream wrapper
             stream = self.socket.makefile('r', encoding='utf-8', errors='ignore')
-            self.socket.settimeout(90.0) # Heartbeat timeout
-
-            print("[DEBUG] State: STREAMING - Pipeline open.")
-
+            
+            # Crucial step: Set raw socket to non-blocking mode so readline() doesn't freeze the QThread
+            self.socket.setblocking(False)
+            timeout_seconds = 90.0
+            
+            print("[DEBUG] State: STREAMING - Non-blocking Pipeline open.")
+            
             while self.is_running:
+                # Use select to wait for data safely without eating 100% CPU core limits
+                ready_to_read, _, _ = select.select([self.socket], [], [], 1.0) # 1-second ticks
+                
+                if not ready_to_read:
+                    continue
+                    
                 line = stream.readline()
                 if not line:
                     print("[DEBUG] Stream EOF detected.")
                     return False
-                # Route through the token parser
+                
+                # 1. Route through the token parser FIRST
                 msg_type, data = self.parser.parse(line)
+                
+                # 2. If parser flags it as NOISE, drop it completely
                 if msg_type == "NOISE":
-                    continue # Ignore, don't emit to UI
+                    continue 
 
-                # Display NOISE filter logging for the console.
-                self.log_received.emit(line)
+                # 3. Emit the clean line to the Active Logs console
+                self.log_received.emit(line.strip())
 
-                # Signal Dissemination
+                # --- SIGNAL DISSEMINATION ---
                 if msg_type == "GLOBAL_CHAT":
                     self.signal_global_chat.emit(data)
                 elif msg_type == "FACTION_CHAT":
                     self.signal_faction_chat.emit(data)
                 elif msg_type == "METRIC":
                     self.signal_metrics.emit(data)
-
+                    
             return True
 
-        except socket.timeout:
-            print("[DEBUG] Stream timeout (90s).")
+        except (socket.timeout, socket.error) as e:
+            print(f"[DEBUG] Connection stream severed: {str(e)}")
             return False
         except Exception as e:
-            print(f"[DEBUG] Stream exception: {e}")
+            print(f"[DEBUG] Unhandled exception inside stream controller: {str(e)}")
             return False
         finally:
             stream.close()    
     
     def stop(self):
-        """Gracefully shuts down the background telemetry stream thread."""
+        """Gracefully halts the pipeline and forcibly kills the socket."""
         self.is_running = False
         if self.socket:
             try:
+                # Tell the server we are done, allowing a clean session cleanup
                 self.socket.shutdown(socket.SHUT_RDWR)
                 self.socket.close()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[DEBUG] Socket cleanup error: {e}")
         self.quit()
-        self.wait(1) # Wait for socket closure for 1 second, then force closure.
+        self.wait(1000) # Wait up to 1 second for the thread to join

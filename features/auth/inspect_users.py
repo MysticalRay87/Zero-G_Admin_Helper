@@ -27,9 +27,9 @@ if os.path.exists(DATA_PATH):
                     # Step 3: Loop through the json array elements sequentially
                     for user in user_list:
                            # Safely extract dictionary keys using fallback default entries
-                           username = user.get("username", "Unknown User")
-                           account_type = user.get("account_type", "Unassigned Tier")
-                           account_status = user.get("status", "Inactive")
+                           username = user.get("Username", "Unknown User")
+                           account_type = user.get("Account Type", "Unassigned Tier")
+                           account_status = user.get("Status", "Inactive")
 
                            # Render the variables within formatted f-string layout blocks
                            print(f"{username:<16} | {account_type:<20} | {account_status:<10}")

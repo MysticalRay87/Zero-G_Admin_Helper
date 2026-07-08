@@ -10,44 +10,60 @@ class TelemetryParser:
             re.compile(r"NullReferenceException"),
             re.compile(r"EmpyrionChatDiscordBridge"),
             re.compile(r"EmpyrionModHost"),
-            re.compile(r"at System\.") # Broad C# stack trace lines
+            re.compile(r"at System\."), 
+            re.compile(r"Thread 'TelnetClient"),
+            re.compile(r"Telnet Connection closed"),
+            re.compile(r"aborted"),
+            re.compile(r"\.\)"),           # ADDED: Block Empyrion weird dot-parenthesis output
+            re.compile(r"\{EPM\}")         # ADDED: Block Empyrion Playfield Manager tool spam
         ]
         
         self.patterns = {
-            "fps": re.compile(r"fps=([\d.]+)"),
-            "heap": re.compile(r"heap=\s*(\d+)MB"),
-            "players": re.compile(r"players=\s*(\d+)"), 
-            "uptime": re.compile(r"Uptime=([\\whm]+)"),
-            "global_chat": re.compile(r"CHAT Player/Global.*:\s*'(.*)'"),
-            "faction_chat": re.compile(r"CHAT Player/Faction.*:\s*'(.*)'"),
-            "system_metric": re.compile(r"(fps|heap|players)=(\S+)")
+            "uptime": re.compile(r"Uptime=(?P<time>[a-zA-Z0-9\s]+)"),
+            "global_chat": re.compile(r"^.*?\[Chat\]\s+'(?P<player>[^']+)'\:\s(?P<message>.*)$"),
+            "faction_chat": re.compile(r"^.*?\[Chat\]\s+\((?P<faction>[A-Za-z0-9]{3,4})\)\s+'(?P<player>[^']+)'\:\s(?P<message>.*)$"),
+            "system_metric": re.compile(r"(?P<metric>fps|heap|players)=(?P<value>[^\s,\)]+)", re.IGNORECASE)
         }
 
     def parse(self, line):
         # 1. Noise Filter: Drop junk immediately
         if any(pattern.search(line) for pattern in self.noise_filters):
             return "NOISE", None
-        
-        # 2. Priority Parsing: Chat messages take precedence
+
+        # 2. Priority Parsing: Faction Chat (Must be checked BEFORE Global Chat to avoid overlapping match traps)
         global_match = self.patterns["global_chat"].search(line)
         if global_match:
-            return "GLOBAL_CHAT", global_match.group(1).strip()
-            
+            data = global_match.groupdict()
+            return "GLOBAL_CHAT", {
+                "player": data["player"].strip(),
+                "message": data["message"].strip()
+            }
         faction_match = self.patterns["faction_chat"].search(line)
         if faction_match:
-            return "FACTION_CHAT", faction_match.group(1).strip()
+            # Use .groupdict() to safely extract ALL captured entities at once
+            data = faction_match.groupdict()
+            return "FACTION_CHAT", {
+                "faction": data["faction"].strip(),
+                "player": data["player"].strip(),
+                "message": data["message"].strip()
+            }
 
-        # 3. Aggregated Metric Parsing: Handle combined metric lines (if any)
+        # 3. High-Performance Metric Harvesting
         metrics = {}
-        for key, pattern in self.patterns.items():
-            if key in ["global_chat", "faction_chat", "system_metric"]:
-                continue
-            match = pattern.search(line)
-            if match:
-                metrics[key] = match.group(1)
         
+        # Fast, single-pass evaluation across unified metrics strings
+        metric_matches = list(self.patterns["system_metric"].finditer(line))
+        if metric_matches:
+            for match in metric_matches:
+                metrics[match.group("metric").lower()] = match.group("value").strip()
+        
+        # Check Uptime separately since it doesn't match the standard telemetry signature
+        uptime_match = self.patterns["uptime"].search(line)
+        if uptime_match:
+            metrics["uptime"] = uptime_match.group("time").strip()
+
         if metrics:
             return "METRIC", metrics
-            
+
         # 4. Fallback for unparsed but non-noisy lines
         return "OTHER", line.strip()
