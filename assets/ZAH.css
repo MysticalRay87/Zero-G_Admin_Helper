@@ -6,8 +6,21 @@
     background-repeat: no-repeat;
 }
 
+QLineEdit {
+    border: none;
+    background: transparent;
+    color: #00ffff;
+    font-family: "Courier New";
+}
+
+QComboBox {
+    border: none;
+    background: transparent;
+    color: #00ffff;
+}
+
 /* Telemetry & Control Panels */
-#TelemetryPanel, #PlayerRegistry, #ControlPanel {
+#TelemetryPanel, #PlayerRegistry, #ControlPanel, #DynamicDisplayA, #DynamicDisplayB {
     background-color: rgba(15, 25, 35, 160);
     border: 1px solid #00d4ff;
     border-radius: 5px;
@@ -19,6 +32,14 @@
     color: #e0e0e0;
     border: 1px solid #005577;
     font-family: "Courier New";
+}
+
+/* Specific styling to overlay over the spreadsheet table headers */
+QHeaderView::section {
+    background-color: rgba(20, 30, 45, 220);
+    color: #00d4ff;
+    border: 1px solid #005577;
+    font-weight: bold;
 }
 
 /* Interactives */
@@ -51,4 +72,33 @@ QLabel {
     border: none;
     color: #00d4ff;
     font-family: "Courier New";
+}
+
+/* ------------------------------------------------------------------
+   DYNAMIC INPUT TARGETING & ERROR FLASH STATE HOOKS
+   ------------------------------------------------------------------ */
+
+/* Establish the base nominal state explicitly targeting your object IDs */
+#username_field, #password_field, #confirm_field {
+    border: transparent;
+    background: transparent;
+}
+
+/* Inject the dynamic error property selector override */
+#username_field[error="true"], 
+#password_field[error="true"], 
+#confirm_field[error="true"] {
+    border: 2px  #ff0000;
+    background-color: rgba(255, 0, 0, 0.05);
+}
+
+/* --------------------------------------------------
+   PUSH BUTTON INVISIBLE OVERLAY MASK
+   -------------------------------------------------- */
+
+QPushButton {
+    border: none;
+    background: transparent;
+    color: transparent;
+    font-weight: bold;
 }
