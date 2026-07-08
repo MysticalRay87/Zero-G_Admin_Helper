@@ -1,11 +1,15 @@
+# telemetry_worker.py
+
 import json
 import os
 import socket
 import select
 import time
+import queue
 import threading
+
 from PyQt6.QtCore import QThread, pyqtSignal
-from features.dashboard.telemetry_parser import TelemetryParser
+from telemetry_parser import TelemetryParser
 from enum import Enum
 
 telemetry_lock = threading.Lock()
@@ -30,6 +34,7 @@ class TelemetryWorker(QThread):
         self.config_path = config_path
         self.is_running = False
         self.socket = None
+        self.command_queue = queue.Queue() # NEW: Master outbound queue
         
         # Dynamically load destination coordinates and passkey
         self.host, self.port, self.password = self._load_credentials()
@@ -134,6 +139,10 @@ class TelemetryWorker(QThread):
                 backoff_delay = min(backoff_delay * 2, 60.0)
                 self.state = WorkerState.DISCONNECTED
 
+    def send_command(self, cmd_text):
+        """Public API: UI calls this to queue commands into the master thread"""
+        self.command_queue.put(cmd_text)
+
     def _perform_streaming(self):
         """
         Manages the high-speed passive stream reading and signal emission.
@@ -151,7 +160,17 @@ class TelemetryWorker(QThread):
             print("[DEBUG] State: STREAMING - Non-blocking Pipeline open.")
             
             while self.is_running:
-                # Use select to wait for data safely without eating 100% CPU core limits
+                # CHECK QUEUE: Injectoutbound commands during idle telemetry ticks
+                try:
+                    # non-blocking check
+                    cmd = self.command_queue.get_nowait()
+                    # Inject payload directly into the master stream
+                    self.socket.sendall(f"{cmd}\r\n".encode('utf-8'))
+                    print(f"[DEBUG] Multiplexer: Injected command: {cmd}")
+                except queue.Empty:
+                    pass
+
+                # SELECT: Keep the passive telemetry read loop alive
                 ready_to_read, _, _ = select.select([self.socket], [], [], 1.0) # 1-second ticks
                 
                 if not ready_to_read:
