@@ -1,5 +1,3 @@
-# main_cockpit.py
-
 import os
 import json
 import socket 
@@ -93,55 +91,71 @@ class MainCockpit(QMainWindow):
         self.master_layout.setSpacing(15)
         self.central_widget.setLayout(self.master_layout)
 
-        # 3. Grid Layout Construction
+        # 3. Grid Layout Construction (Must happen first to initialize self.feed_stack)
         self.setup_zones()
 
-        # 4. Telemetry Component Allocation (Must follow grid definition if integrated)
+        # 4. --- Initialize Workers ---
+        # TelemetryWorker acts as the master authority for the socket connection
         self.telemetry_worker = TelemetryWorker()
+        
+        # CommandPipe is initialized as a lightweight proxy
+        self.command_pipe = CommandPipe()
+        
+        # Injection: Link the CommandPipe proxy to the TelemetryWorker master socket
+        self.command_pipe.set_telemetry_authority(self.telemetry_worker)
+
+        # 5. --- Signal Bridge Connections ---
+        # Telemetry signal mapping (Using QueuedConnection ensures UI updates happen on main thread)
         self.telemetry_worker.log_received.connect(self.update_console)
         self.telemetry_worker.connection_status.connect(self.update_server_status, QtCore.Qt.ConnectionType.QueuedConnection)
         self.telemetry_worker.signal_metrics.connect(self.update_telemetry_ui)
+        
+        # Chat routing with forced Queueing to prevent thread-safety issues during screen switching
+        try:
+            self.telemetry_worker.signal_global_chat.disconnect(self.handle_global_chat)
+        except (TypeError, RuntimeError):
+            pass
+        self.telemetry_worker.signal_global_chat.connect(self.handle_global_chat, QtCore.Qt.ConnectionType.QueuedConnection)
+        try:
+            self.telemetry_worker.signal_faction_chat.disconnect(self.handle_faction_chat)
+        except (TypeError, RuntimeError):
+            pass
+        self.telemetry_worker.signal_faction_chat.connect(self.handle_faction_chat, QtCore.Qt.ConnectionType.QueuedConnection)
 
-        self.telemetry_worker.signal_global_chat.connect(self.handle_global_chat)
-        self.telemetry_worker.signal_faction_chat.connect(self.handle_faction_chat)     
+        # CommandPipe signal mapping
+        self.command_pipe.status_msg.connect(self.handle_console_response)
 
-        # 5. --- Core Standalone Telemetry Component Allocation ---
+        # 6. --- Start Background Threads ---
+        self.telemetry_worker.start()
+        self.command_pipe.start()
+
+        # 7. --- UI Components ---
         self.telemetry_widget = TelemetryWidget(self)
         self.telemetry_widget.move(850, 120)
         self.telemetry_widget.show()
-        self.telemetry_worker.start()
 
-        # 6. --- Command & Resource Subsystems ---
-
-        # 6A. ---Initialize CommandPipe ---
-        # Ensure it doesn't get garbage collected
-        self.command_pipe = CommandPipe()
-        self.command_pipe.status_msg.connect(self.handle_console_response)
-        self.command_pipe.start()
-       
-
-        # 6B. --- Initialize and Start Resource Poller ---
+        # 8. --- Initialize and Start Resource Poller ---
         self.resource_worker = ResourcePollingWorker()
         self.resource_worker.signal_resources_received.connect(self.update_resource_ui)
         self.resource_worker.start()
 
-        # 7. --- Panel Binder ---
+        # 9. --- Panel Binder ---
         self.global_chat_display = self.global_chat_box
         self.faction_chat_display = self.faction_chat_box
 
-        # 8. --- Console Buffer Management ---
+        # 10. --- Console Buffer Management ---
         self.is_first_login = True
         self.response_buffer = []
         self.flush_timer = QTimer()
         self.flush_timer.setSingleShot(True)
         self.flush_timer.timeout.connect(self._flush_console)
 
-        # 9. --- Initialize themes ---
+        # 11. --- Initialize themes ---
         self.apply_theme()
         
         print("[SUCCESS] Main Cockpit Dashboard initialized.")
 
-        # 10. --- Dynamic Configuration Loading ---
+        # 12. --- Dynamic Configuration Loading ---
         self.load_network_config()
 
     def setup_zones(self):
@@ -344,6 +358,7 @@ class MainCockpit(QMainWindow):
         if is_online:
             self.telemetry_widget.lbl_server_status.setText("Server Status: ONLINE")
             self.telemetry_widget.lbl_server_status.setStyleSheet("color: #00FF00; font-weight: bold;")
+            self.command_pipe.set_telemetry_authority(self.telemetry_worker)
         else:
             self.telemetry_widget.lbl_server_status.setText("Server Status: OFFLINE")
             self.telemetry_widget.lbl_server_status.setStyleSheet("color: #FF0000; font-weight: bold;")
@@ -401,26 +416,36 @@ class MainCockpit(QMainWindow):
 
     # --- Chat Handler ---
 
-    def handle_global_chat(self, data: dict):
-        """Slot to receive and display global chat messages."""
-        if hasattr(self, 'global_chat_display'):
-            self.global_chat_display.append(f"[GLOBAL] {data['player']}: {data['message']}")
-            # Auto-scroll to the newest message
-            sb = self.global_chat_display.verticalScrollBar()
-            sb.setValue(sb.maximum())
-
-    def handle_faction_chat(self, data: dict):
-        """Slot to receive and display faction chat messages."""
-        if hasattr(self, 'faction_chat_display'):
-            self.faction_chat_display.append(f"[FACTION] ({data['faction']}) {data['player']}: {data['message']}")
-            # Auto-scroll
-            sb = self.faction_chat_display.verticalScrollBar()
-            sb.setValue(sb.maximum())
-
     def switch_chat_tab(self, tab_index):
             """Switches the visible chat box using the stacked widget index."""
             self.chat_stack.setCurrentIndex(tab_index)
-            # Update button styles here to show which one is active
+
+    def handle_global_chat(self, data: dict):
+        """Receives chat and forces the UI to show the Global Chat screen (Index 0)."""
+        # 1. Update the display box
+        if hasattr(self, 'global_chat_box'):
+            self.global_chat_box.append(f"[GLOBAL] {data['player']}: {data['message']}")
+            
+        # 2. Redirect/Switch the UI to the Global Chat tab (Index 0)
+        self.feed_stack.setCurrentIndex(0)
+        
+        # 3. Auto-scroll
+        sb = self.global_chat_box.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    def handle_faction_chat(self, data: dict):
+        print(f"[DEBUG] Handler Triggered. Data: {data}")
+        
+        # Verify feed_stack exists
+        if not hasattr(self, 'feed_stack'):
+            print("[CRITICAL] self.feed_stack DOES NOT EXIST!")
+            return
+
+        # Explicitly append and switch
+        self.faction_chat_box.append(f"[FACTION] {data['player']}: {data['message']}")
+        self.feed_stack.setCurrentIndex(1) # Ensure this is the correct index
+        
+        print(f"[DEBUG] Current Stack Index is: {self.feed_stack.currentIndex()}")
 
     # --- Command Execution ---
 

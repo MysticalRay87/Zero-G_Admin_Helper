@@ -13,6 +13,8 @@ class TelemetryParser:
             re.compile(r"at System\."), 
             re.compile(r"Thread 'TelnetClient"),
             re.compile(r"Telnet Connection closed"),
+            re.compile(r"transport connection"),     # ADD THIS: Broadens the catch for socket aborts
+            re.compile(r"aborted by the software"),   # ADD THIS: Specifically targets the host machine aborts
             re.compile(r"aborted"),
             re.compile(r"\.\)"),           # ADDED: Block Empyrion weird dot-parenthesis output
             re.compile(r"\{EPM\}")         # ADDED: Block Empyrion Playfield Manager tool spam
@@ -20,8 +22,14 @@ class TelemetryParser:
         
         self.patterns = {
             "uptime": re.compile(r"Uptime=(?P<time>[a-zA-Z0-9\s]+)"),
-            "global_chat": re.compile(r"^.*?\[Chat\]\s+'(?P<player>[^']+)'\:\s(?P<message>.*)$"),
-            "faction_chat": re.compile(r"^.*?\[Chat\]\s+\((?P<faction>[A-Za-z0-9]{3,4})\)\s+'(?P<player>[^']+)'\:\s(?P<message>.*)$"),
+            
+            # Updated to look for text inside parentheses for the faction group
+            "global_chat": re.compile(r"CHAT ServerForward/Global.*? \((?P<player>.*?)\):\s*'(?P<message>.*?)'"),
+            
+            # Updated pattern: Matches "CHAT ServerForward/Faction from ... (Faction) ... (Player)"
+            # This uses a non-greedy match to find the parenthetical faction tag
+            "faction_chat": re.compile(r"CHAT ServerForward/Faction.*? \((?P<player>.*?)\):\s*'(?P<message>.*?)'"),
+            
             "system_metric": re.compile(r"(?P<metric>fps|heap|players)=(?P<value>[^\s,\)]+)", re.IGNORECASE)
         }
 
@@ -31,22 +39,32 @@ class TelemetryParser:
             return "NOISE", None
 
         # 2. Priority Parsing: Faction Chat (Must be checked BEFORE Global Chat to avoid overlapping match traps)
-        global_match = self.patterns["global_chat"].search(line)
-        if global_match:
-            data = global_match.groupdict()
-            return "GLOBAL_CHAT", {
-                "player": data["player"].strip(),
-                "message": data["message"].strip()
-            }
         faction_match = self.patterns["faction_chat"].search(line)
         if faction_match:
-            # Use .groupdict() to safely extract ALL captured entities at once
-            data = faction_match.groupdict()
-            return "FACTION_CHAT", {
-                "faction": data["faction"].strip(),
-                "player": data["player"].strip(),
-                "message": data["message"].strip()
-            }
+            try:
+                data = faction_match.groupdict()
+                return "FACTION_CHAT", {
+                    "faction": "N/A",
+                    "player": data["player"].strip(),
+                    "message": data["message"].strip()
+                }
+            except KeyError as e:
+                # If a group is missing, log the error instead of crashing the thread
+                print(f"[ERROR] Faction Chat Parsing Error: Missing group {e}")
+                return "NOISE", None
+            
+        global_match = self.patterns["global_chat"].search(line)
+        if global_match:
+            try:
+                data = global_match.groupdict()
+                return "GLOBAL_CHAT", {
+                    "player": data["player"].strip(),
+                    "message": data["message"].strip()
+                }
+            except KeyError as e:
+                # If a group is missing, log the error instead of crashing the thread
+                print(f"[ERROR] Global Chat Parsing Error: Missing group {e}")
+                return "NOISE", None
 
         # 3. High-Performance Metric Harvesting
         metrics = {}
