@@ -26,6 +26,7 @@ class TelemetryWorker(QThread):
     signal_global_chat = pyqtSignal(dict)
     signal_faction_chat = pyqtSignal(dict)
     signal_metrics = pyqtSignal(dict)
+    signal_player_join = pyqtSignal(dict)
 
     def __init__(self, config_path="data/server_config.json"):
         super().__init__()
@@ -80,11 +81,14 @@ class TelemetryWorker(QThread):
                     self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     self.socket.settimeout(10.0)
                     print(f"[DEBUG] Attempting connection to {self.host}:{self.port}...")
+                    
                     self.socket.connect((self.host, int(self.port)))
                     self.connection_status.emit(True)
                     print("[DEBUG] State: CONNECTING -> AUTHENTICATING")
+                    
                     self.state = WorkerState.AUTHENTICATING
                     backoff_delay = 1.0 # Reset backoff on successful connect
+                
                 except Exception as e:
                     print(f"[DEBUG] Connection failed: {e}")
                     self.state = WorkerState.RECOVERY
@@ -107,6 +111,7 @@ class TelemetryWorker(QThread):
                     else:
                         print("[DEBUG] Unexpected handshake response. Aborting.")
                         self.state = WorkerState.RECOVERY
+                
                 except Exception as e:
                     print(f"[DEBUG] Authentication failure: {e}")
                     self.state = WorkerState.RECOVERY
@@ -115,6 +120,10 @@ class TelemetryWorker(QThread):
             # STATE: STREAMING - Passive Read Loop
             # -------------------------------------------------------------
             elif self.state == WorkerState.STREAMING:
+                # Force a snapshot of online players upon first entry
+                print("[DEBUG] STREAMING activated. Requesting player list snapshot...")
+                self.write_command("plys")
+
                 self._perform_streaming()
                 # If _perform_streaming exits, we lost the stream
                 print("[DEBUG] State: STREAMING -> RECOVERY")
@@ -165,7 +174,7 @@ class TelemetryWorker(QThread):
                     return False
                 
                 # Remove (hash) to reactivate Raw Stream Ingestion
-                print(f"[DEBUG] Raw Stream Ingestion: {line.strip()}")
+                print(line.strip())
                 
                 # 1. Route through the token parser FIRST
                 msg_type, data = self.parser.parse(line)
@@ -178,11 +187,17 @@ class TelemetryWorker(QThread):
                 self.log_received.emit(line.strip())
 
                 # --- SIGNAL DISSEMINATION ---
-                if msg_type == "GLOBAL_CHAT":
+                if msg_type == "PLAYER_JOIN":
+                    print(f"[DEBUG] PlayerJoin: Emitting Player ID/Name Signal: {data}")
+                    self.signal_player_join.emit(data)
+                elif msg_type == "GLOBAL_CHAT":
+                    print(f"[DEBUG] GlobalChat: Emitting GlobalChat Signal: {data}")
                     self.signal_global_chat.emit(data)
                 elif msg_type == "FACTION_CHAT":
+                    print(f"[DEBUG] FactionChat: Emitting FactionChat Signal: {data}")
                     self.signal_faction_chat.emit(data)
                 elif msg_type == "METRIC":
+                    print(f"[DEBUG] METRICS: Emitting METRICS Signal: {data}")
                     self.signal_metrics.emit(data)
                     
             return True

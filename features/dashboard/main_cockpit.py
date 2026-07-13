@@ -104,12 +104,17 @@ class MainCockpit(QMainWindow):
         # Injection: Link the CommandPipe proxy to the TelemetryWorker master socket
         self.command_pipe.set_telemetry_authority(self.telemetry_worker)
 
-        # 5. --- Signal Bridge Connections ---
+        # 5. --- Data Structures ---       
+        self.player_map = {} # { "3129": "Manta" }
+
+        # 6. --- Signal Bridge Connections ---
         # Telemetry signal mapping (Using QueuedConnection ensures UI updates happen on main thread)
         self.telemetry_worker.log_received.connect(self.update_console)
         self.telemetry_worker.connection_status.connect(self.update_server_status, QtCore.Qt.ConnectionType.QueuedConnection)
         self.telemetry_worker.signal_metrics.connect(self.update_telemetry_ui)
-        
+        self.telemetry_worker.signal_player_join.connect(self.handle_player_join)
+
+
         # Chat routing with forced Queueing to prevent thread-safety issues during screen switching
         try:
             self.telemetry_worker.signal_global_chat.disconnect(self.handle_global_chat)
@@ -125,37 +130,37 @@ class MainCockpit(QMainWindow):
         # CommandPipe signal mapping
         self.command_pipe.status_msg.connect(self.handle_console_response)
 
-        # 6. --- Start Background Threads ---
+        # 7. --- Start Background Threads ---
         self.telemetry_worker.start()
         self.command_pipe.start()
 
-        # 7. --- UI Components ---
+        # 8. --- UI Components ---
         self.telemetry_widget = TelemetryWidget(self)
         self.telemetry_widget.move(850, 120)
         self.telemetry_widget.show()
 
-        # 8. --- Initialize and Start Resource Poller ---
+        # 9. --- Initialize and Start Resource Poller ---
         self.resource_worker = ResourcePollingWorker()
         self.resource_worker.signal_resources_received.connect(self.update_resource_ui)
         self.resource_worker.start()
 
-        # 9. --- Panel Binder ---
+        # 10. --- Panel Binder ---
         self.global_chat_display = self.global_chat_box
         self.faction_chat_display = self.faction_chat_box
 
-        # 10. --- Console Buffer Management ---
+        # 11. --- Console Buffer Management ---
         self.is_first_login = True
         self.response_buffer = []
         self.flush_timer = QTimer()
         self.flush_timer.setSingleShot(True)
         self.flush_timer.timeout.connect(self._flush_console)
 
-        # 11. --- Initialize themes ---
+        # 12. --- Initialize themes ---
         self.apply_theme()
         
         print("[SUCCESS] Main Cockpit Dashboard initialized.")
 
-        # 12. --- Dynamic Configuration Loading ---
+        # 13. --- Dynamic Configuration Loading ---
         self.load_network_config()
 
     def setup_zones(self):
@@ -347,9 +352,10 @@ class MainCockpit(QMainWindow):
         self.feed_stack.setCurrentIndex(idx)
 
         # Makes Input Control Context-aware
-        is_console = (idx == 2)
-        self.cmd_input.setVisible(is_console)
-        self.execute_btn.setVisible(is_console)
+        active_indices = [0, 1, 2]
+        is_active = idx in active_indices
+        self.cmd_input.setVisible(is_active)
+        self.execute_btn.setVisible(is_active)
     
     # --- Telemetry & Data Processing ---
 
@@ -380,16 +386,26 @@ class MainCockpit(QMainWindow):
             self.telemetry_widget.lbl_uptime.setText(f"Uptime: {data['uptime']}")
             self.telemetry_widget.lbl_uptime.repaint()
 
-    def update_resource_ui(self, resources):
-        # Explicit mapping
-        cpu_get = resources.get("cpu", 0.00)
-        ram = round(resources.get("ram", 0.0), 1)
+    def handle_player_join(self, data: dict):
+        self.player_map[data['id']] = data['name']
+        print(f"[DEBUG] Registered player {data['name']} with ID {data['id']}")
 
-        cpu = f"{cpu_get:.2f}"
-        
-        # Apply to UI - no rounding, full precision
-        self.telemetry_widget.lbl_server_cpu.setText(f"CPU: {cpu}%")
-        self.telemetry_widget.lbl_server_ram.setText(f"RAM: {ram}%")
+    def update_resource_ui(self, resources):
+        # Defensive check: ensure resources is a valid dictionary
+        if not isinstance(resources, dict):
+            return
+
+        # Use safe defaults and explicit float casting
+        try:
+            cpu_val = float(resources.get("cpu", 0.0))
+            ram_val = float(resources.get("ram", 0.0))
+        except (ValueError, TypeError):
+            cpu_val = 0.0
+            ram_val = 0.0
+
+        # Apply to UI
+        self.telemetry_widget.lbl_server_cpu.setText(f"CPU: {cpu_val:.2f}%")
+        self.telemetry_widget.lbl_server_ram.setText(f"RAM: {ram_val:.1f}%")
 
     def update_console(self, text, is_outbound=False, is_banner=False):
         """Manager: Appends one atomic block at a time."""
@@ -421,31 +437,70 @@ class MainCockpit(QMainWindow):
             self.chat_stack.setCurrentIndex(tab_index)
 
     def handle_global_chat(self, data: dict):
-        """Receives chat and forces the UI to show the Global Chat screen (Index 0)."""
-        # 1. Update the display box
-        if hasattr(self, 'global_chat_box'):
-            self.global_chat_box.append(f"[GLOBAL] {data['player']}: {data['message']}")
-            
-        # 2. Redirect/Switch the UI to the Global Chat tab (Index 0)
-        self.feed_stack.setCurrentIndex(0)
+        print(f"[DEBUG] Handler Triggered. Data: {data}")
         
-        # 3. Auto-scroll
+        # 1. Resolve identity: Use ID if available, otherwise fallback to the raw data
+        player_id = data.get('id')
+        display_name = self.player_map.get(player_id, data.get('player', 'Unknown'))
+        
+        # 2. Fallback: If map lookup fails, use the raw data (only if not a hyphen)
+        if not display_name or display_name == "-":
+            raw_player = data.get('player', 'Unknown')
+            display_name = raw_player if raw_player != "-" else "System/Bridge"
+
+        # 3. Cleanup for the UI
+        if display_name == "-1":
+            display_name = "System/Bridge"
+
+         # Strip the color tag if it exists
+        msg = data.get('message', '').replace('[c]', '')
+
+        # Verify feed_stack exists
+        if not hasattr(self, 'feed_stack'):
+            print("[CRITICAL] self.feed_stack DOES NOT EXIST!")
+            return
+        
+        print(f"[DEBUG] Global message appended: {msg}")
+
+        if hasattr(self, 'global_chat_box'):
+            self.global_chat_box.append(f"[GLOBAL] {display_name}: {msg}")
+        
+        # Auto-scroll
         sb = self.global_chat_box.verticalScrollBar()
         sb.setValue(sb.maximum())
 
     def handle_faction_chat(self, data: dict):
         print(f"[DEBUG] Handler Triggered. Data: {data}")
+
+        # Resolve identity: Use ID if available, otherwise fallback to the raw data
+        player_id = data.get('id')
+        display_name = self.player_map.get(player_id, data.get('player', 'Unknown'))
+
+        # 2. Fallback: If map lookup fails, use the raw data (only if not a hyphen)
+        if not display_name or display_name == "-":
+            raw_player = data.get('player', 'Unknown')
+            display_name = raw_player if raw_player != "-" else "System/Bridge"
         
+        # Cleanup for the UI
+        if display_name == "-1":
+            display_name = "System/Bridge"
+        
+        # Strip the color tag if it exists
+        msg = data.get('message', '').replace('[c]', '')
+
         # Verify feed_stack exists
         if not hasattr(self, 'feed_stack'):
             print("[CRITICAL] self.feed_stack DOES NOT EXIST!")
             return
-
-        # Explicitly append and switch
-        self.faction_chat_box.append(f"[FACTION] {data['player']}: {data['message']}")
-        self.feed_stack.setCurrentIndex(1) # Ensure this is the correct index
         
-        print(f"[DEBUG] Current Stack Index is: {self.feed_stack.currentIndex()}")
+        print(f"[DEBUG] Faction message appended: {msg}")
+
+        if hasattr(self, 'faction_chat_box'):
+            self.faction_chat_box.append(f"[FACTION] {display_name}: {msg}")
+        
+        # Auto-scroll
+        sb = self.faction_chat_box.verticalScrollBar()
+        sb.setValue(sb.maximum())
 
     # --- Command Execution ---
 
@@ -455,27 +510,34 @@ class MainCockpit(QMainWindow):
         Context-aware: Automatically prepends the correct chat syntax based on the active tab.
         """
         text = self.cmd_input.text().strip()
+        if not text:
+            self.update_console("[SYSTEM] Empty command ignored.")
+            return
         
         # Determine target based on the active QStackedWidget index (self.feed_stack)
         current_idx = self.feed_stack.currentIndex()
         
         if current_idx == 0:
-            command = f"say '{text}'\n"         # Tab 0: Global Chat
+            command = f"say '{text}'\n"
+            ui_display = f"[GLOBAL] You: {text}"
+            target_box = self.global_chat_box
         elif current_idx == 1:
-            command = f"faction say '{text}'\n" # Tab 1: Faction Chat
+            command = f"faction say '{text}'\n"
+            ui_display = f"[FACTION] You: {text}"
+            target_box = self.faction_chat_box
         elif current_idx == 2:
-            command = text                    # Tab 2: Direct Admin Console
+            command = f"{text}\n"
+            ui_display = f"[CMD] {text}"
+            target_box = self.console
         else:
-            command = text                    # Tab 3: Logs
-
-        if not text:
-            self.update_console("[SYSTEM] Empty command ignored.")
+            # Index 3: Logs (Read-only, maybe ignore or treat as raw)
+            self.update_console("[SYSTEM] Cannot send messages to log viewer.")
             return
-            
+           
         # Queue for safe, throttled execution (500ms delay enforced by pipe)
         if hasattr(self, 'command_pipe'):
-            self.update_console(command, is_outbound=True)
             self.command_pipe.send_command(command)
+            target_box.append(ui_display) # Update UI locally
             self.cmd_input.clear()
         else:
             self.console.append("[ERROR] CommandPipe not initialized.")

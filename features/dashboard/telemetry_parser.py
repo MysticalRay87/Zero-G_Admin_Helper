@@ -4,68 +4,68 @@ class TelemetryParser:
     """Stateless parser for Empyrion server log lines."""
     
     def __init__(self):
-        # Define noise patterns that trigger server-side mod crashes or metadata junk
-        self.noise_filters = [
-            re.compile(r"System\.Reflection\.TargetInvocationException"),
-            re.compile(r"NullReferenceException"),
-            re.compile(r"EmpyrionChatDiscordBridge"),
-            re.compile(r"EmpyrionModHost"),
-            re.compile(r"at System\."), 
-            re.compile(r"Thread 'TelnetClient"),
-            re.compile(r"Telnet Connection closed"),
-            re.compile(r"transport connection"),     # ADD THIS: Broadens the catch for socket aborts
-            re.compile(r"aborted by the software"),   # ADD THIS: Specifically targets the host machine aborts
-            re.compile(r"aborted"),
-            re.compile(r"\.\)"),           # ADDED: Block Empyrion weird dot-parenthesis output
-            re.compile(r"\{EPM\}")         # ADDED: Block Empyrion Playfield Manager tool spam
-        ]
-        
-        self.patterns = {
-            "uptime": re.compile(r"Uptime=(?P<time>[a-zA-Z0-9\s]+)"),
+            # Noise patterns to be ignored entirely
+            self.noise_filters = [
+                re.compile(r"System\.Reflection\.TargetInvocationException"),
+                re.compile(r"NullReferenceException"),
+                re.compile(r"EmpyrionChatDiscordBridge"),
+                re.compile(r"EmpyrionModHost"),
+                re.compile(r"at System\."), 
+                re.compile(r"Thread 'TelnetClient"),
+                re.compile(r"Telnet Connection closed"),
+                re.compile(r"transport connection"),
+                re.compile(r"aborted by the software"),
+                re.compile(r"aborted"),
+                re.compile(r"\.\)"),
+                re.compile(r"\{EPM\}")
+            ]
             
-            # Updated to look for text inside parentheses for the faction group
-            "global_chat": re.compile(r"CHAT ServerForward/Global.*? \((?P<player>.*?)\):\s*'(?P<message>.*?)'"),
+            # Patterns for metrics and uptime (non-chat)
+            self.patterns = {
+                "uptime": re.compile(r"Uptime=(?P<time>[a-zA-Z0-9\s]+)"),
+                "system_metric": re.compile(r"(?P<metric>fps|heap|players)=(?P<value>[^\s,\)]+)", re.IGNORECASE),
+                "player_join": re.compile(r"Got player id: CId=\d+, EId=(?P<id>\d+), .*?/'(?P<name>.*?)'"),
+                "list_entry": re.compile(r"id=(?P<id>\d+), Name='(?P<name>.*?) (?=fac=)")
+            }
             
-            # Updated pattern: Matches "CHAT ServerForward/Faction from ... (Faction) ... (Player)"
-            # This uses a non-greedy match to find the parenthetical faction tag
-            "faction_chat": re.compile(r"CHAT ServerForward/Faction.*? \((?P<player>.*?)\):\s*'(?P<message>.*?)'"),
-            
-            "system_metric": re.compile(r"(?P<metric>fps|heap|players)=(?P<value>[^\s,\)]+)", re.IGNORECASE)
-        }
+            # Dedicated routing map for all chat types
+            # This includes both old ServerForward formats and new Player-Direct formats
+            self.chat_routing = {
+                "GLOBAL": re.compile(r"CHAT (ServerForward/Global|Player/Global) from (?P<id>-?\d+)/.*? \((?P<player>.*?)\):\s*'(?P<message>.*?)'"),
+                "FACTION": re.compile(r"CHAT (ServerForward/Faction|Player/Faction) from (?P<id>-?\d+)/.*? \((?P<player>.*?)\):\s*'(?P<message>.*?)'")
+            }
 
     def parse(self, line):
         # 1. Noise Filter: Drop junk immediately
         if any(pattern.search(line) for pattern in self.noise_filters):
             return "NOISE", None
+        
+        # Check for list output
+        list_match = self.patterns["list_entry"].search(line)
+        if list_match:
+            return "PLAYER_JOIN", list_match.groupdict()
+        
+        login_match = self.patterns["player_join"].search(line)
+        if login_match:
+            return "PLAYER_JOIN", login_match.groupdict()
 
-        # 2. Priority Parsing: Faction Chat (Must be checked BEFORE Global Chat to avoid overlapping match traps)
-        faction_match = self.patterns["faction_chat"].search(line)
-        if faction_match:
-            try:
-                data = faction_match.groupdict()
-                return "FACTION_CHAT", {
-                    "faction": "N/A",
-                    "player": data["player"].strip(),
-                    "message": data["message"].strip()
+        # 2. Priority Parsing: Multi-pattern routing
+        # This replaces manual if/else blocks with a loop that checks the 
+        # chat_routing dictionary defined in __init__.
+        for chat_type, pattern in self.chat_routing.items():
+            match = pattern.search(line)
+            if match:
+                data = match.groupdict()
+                # Dynamically construct the signal type (e.g., GLOBAL_CHAT)
+                print(f"[DEBUG] Regex extracted: {data}")
+                # We use .get() here as a safety measure to prevent KeyError
+                return f"{chat_type}_CHAT", {
+                    "id": data.get("id"),
+                    "faction": data.get("faction", "N/A"),
+                    "player": data.get("player", "Unknown").strip(),
+                    "message": data.get("message", "").strip()
                 }
-            except KeyError as e:
-                # If a group is missing, log the error instead of crashing the thread
-                print(f"[ERROR] Faction Chat Parsing Error: Missing group {e}")
-                return "NOISE", None
             
-        global_match = self.patterns["global_chat"].search(line)
-        if global_match:
-            try:
-                data = global_match.groupdict()
-                return "GLOBAL_CHAT", {
-                    "player": data["player"].strip(),
-                    "message": data["message"].strip()
-                }
-            except KeyError as e:
-                # If a group is missing, log the error instead of crashing the thread
-                print(f"[ERROR] Global Chat Parsing Error: Missing group {e}")
-                return "NOISE", None
-
         # 3. High-Performance Metric Harvesting
         metrics = {}
         
