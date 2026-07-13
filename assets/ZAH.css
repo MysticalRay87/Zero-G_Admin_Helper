@@ -99,6 +99,7 @@ QLabel {
 QPushButton {
     border: none;
     background: transparent;
+    /* border: 2px #ff0000; */
     color: transparent;
     font-weight: bold;
 }

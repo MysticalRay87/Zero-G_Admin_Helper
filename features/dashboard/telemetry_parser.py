@@ -22,8 +22,8 @@ class TelemetryParser:
             
             # Patterns for metrics and uptime (non-chat)
             self.patterns = {
-                "uptime": re.compile(r"Uptime=(?P<time>[a-zA-Z0-9\s]+)"),
-                "system_metric": re.compile(r"(?P<metric>fps|heap|players)=(?P<value>[^\s,\)]+)", re.IGNORECASE),
+                "uptime": re.compile(r"Uptime=(?P<time>[a-zA-Z0-9/s]+)"),
+                "system_metric": re.compile(r"(?P<metric>fps|heap|players)=\s*(?P<value>[^\s,\)]+)", re.IGNORECASE),
                 "player_join": re.compile(r"Got player id: CId=\d+, EId=(?P<id>\d+), .*?/'(?P<name>.*?)'"),
                 "list_entry": re.compile(r"id=(?P<id>\d+), Name='(?P<name>.*?) (?=fac=)")
             }
