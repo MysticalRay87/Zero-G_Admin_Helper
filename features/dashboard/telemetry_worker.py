@@ -145,6 +145,8 @@ class TelemetryWorker(QThread):
                 backoff_delay = min(backoff_delay * 2, 60.0)
                 self.state = WorkerState.DISCONNECTED
 
+        print("[DEBUG] TelemetryWorker: Stream captured.")
+
     def _perform_streaming(self):
         """
         Manages the high-speed passive stream reading and signal emission.

@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import socket 
 from PyQt6 import QtCore
@@ -13,6 +14,7 @@ from PyQt6.QtGui import QPainter, QPixmap
 from features.dashboard.telemetry_worker import TelemetryWorker
 from features.dashboard.resource_worker import ResourcePollingWorker
 from features.dashboard.command_pipe import CommandPipe
+from features.dashboard.log_tee import LogTee
 
 class TelemetryWidget(QFrame):
     """
@@ -22,6 +24,7 @@ class TelemetryWidget(QFrame):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+
         self.setObjectName("TelemetryPanel")
         self.setFixedSize(330, 70)  # Strict dimensional boundary control
         self.setStyleSheet("""
@@ -75,39 +78,59 @@ class MainCockpit(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
 
+        # 1. Base UI Setup (Must happen before widgets exist)
+        print("[DEBUG] MainCockpit: Entering __init__...")
+        print("[DEBUG] MainCockpit: Initializing Grid...")
         self.setObjectName("MainCockpitCanvas")
         self.setWindowTitle("Zero-G Admin Helper - Dashboard")
         self.setFixedSize(1280, 900)
 
-        # 1. --- Central UI Canvas ---
+        # 2. --- Central UI Canvas ---
         self.central_widget = QWidget()
         self.central_widget.setObjectName("CentralWidgetCanvas")
         self.setCentralWidget(self.central_widget)
         self.background = QPixmap("assets/backgrounds/background.png")
 
-        # 2. --- Master Layout & Scaffolding ---
+        # 3. --- Master Layout & Scaffolding ---
         self.master_layout = QHBoxLayout()
         self.master_layout.setContentsMargins(90, 205, 90, 95) 
         self.master_layout.setSpacing(15)
         self.central_widget.setLayout(self.master_layout)
 
-        # 3. Grid Layout Construction (Must happen first to initialize self.feed_stack)
+        # 4. Grid Layout Construction (Must happen first to initialize self.system_logs_box)
+        print("[DEBUG] MainCockpit: Setting up Zones...")
         self.setup_zones()
 
-        # 4. --- Initialize Workers ---
+        self.log_tee = LogTee()
+
+        # Test widget accessibility
+        print("[DEBUG] System Logs Widget Status:", self.system_logs_box)
+        self.system_logs_box.setPlainText("DEBUG: Widget is alive.")
+
+        # 5. Initialize the Tee and connect it AFTER setup_zones creates the widget
+        self.log_tee.new_log.connect(self.system_logs_box.append)
+        
+        # 6. Redirect all prints
+        sys.stdout = self.log_tee
+        sys.stderr = self.log_tee
+
+        self.system_logs_box.append("CONNECTION TEST: If you see this, the connection works.")
+
+        # 7. --- Initialize Workers ---
+        print("[DEBUG] MainCockpit: Initializing Workers...")
         # TelemetryWorker acts as the master authority for the socket connection
         self.telemetry_worker = TelemetryWorker()
         
-        # CommandPipe is initialized as a lightweight proxy
+        # 8. CommandPipe is initialized as a lightweight proxy
         self.command_pipe = CommandPipe()
         
-        # Injection: Link the CommandPipe proxy to the TelemetryWorker master socket
+        # 9. Injection: Link the CommandPipe proxy to the TelemetryWorker master socket
         self.command_pipe.set_telemetry_authority(self.telemetry_worker)
 
-        # 5. --- Data Structures ---       
+        # 10. --- Data Structures ---       
         self.player_map = {} # { "3129": "Manta" }
 
-        # 6. --- Signal Bridge Connections ---
+        # 11. --- Signal Bridge Connections ---
         # Telemetry signal mapping (Using QueuedConnection ensures UI updates happen on main thread)
         self.telemetry_worker.log_received.connect(self.update_console)
         self.telemetry_worker.connection_status.connect(self.update_server_status, QtCore.Qt.ConnectionType.QueuedConnection)
@@ -115,7 +138,7 @@ class MainCockpit(QMainWindow):
         self.telemetry_worker.signal_player_join.connect(self.handle_player_join)
 
 
-        # Chat routing with forced Queueing to prevent thread-safety issues during screen switching
+        # 12. Chat routing with forced Queueing to prevent thread-safety issues during screen switching
         try:
             self.telemetry_worker.signal_global_chat.disconnect(self.handle_global_chat)
         except (TypeError, RuntimeError):
@@ -127,40 +150,41 @@ class MainCockpit(QMainWindow):
             pass
         self.telemetry_worker.signal_faction_chat.connect(self.handle_faction_chat, QtCore.Qt.ConnectionType.QueuedConnection)
 
-        # CommandPipe signal mapping
+        # 13. CommandPipe signal mapping
         self.command_pipe.status_msg.connect(self.handle_console_response)
 
-        # 7. --- Start Background Threads ---
+        # 14. --- Start Background Threads ---
         self.telemetry_worker.start()
         self.command_pipe.start()
 
-        # 8. --- UI Components ---
+        # 15. --- UI Components ---
         self.telemetry_widget = TelemetryWidget(self)
         self.telemetry_widget.move(850, 120)
         self.telemetry_widget.show()
 
-        # 9. --- Initialize and Start Resource Poller ---
+        # 16. --- Initialize and Start Resource Poller ---
         self.resource_worker = ResourcePollingWorker()
         self.resource_worker.signal_resources_received.connect(self.update_resource_ui)
         self.resource_worker.start()
 
-        # 10. --- Panel Binder ---
+        # 17. --- Panel Binder ---
         self.global_chat_display = self.global_chat_box
         self.faction_chat_display = self.faction_chat_box
 
-        # 11. --- Console Buffer Management ---
+        # 18. --- Console Buffer Management ---
         self.is_first_login = True
         self.response_buffer = []
         self.flush_timer = QTimer()
         self.flush_timer.setSingleShot(True)
         self.flush_timer.timeout.connect(self._flush_console)
 
-        # 12. --- Initialize themes ---
+        # 19. --- Initialize themes ---
+        print("[DEBUG] MainCockpit: Applying Styles...")
         self.apply_theme()
         
         print("[SUCCESS] Main Cockpit Dashboard initialized.")
 
-        # 13. --- Dynamic Configuration Loading ---
+        # 20. --- Dynamic Configuration Loading ---
         self.load_network_config()
 
     def setup_zones(self):
@@ -168,6 +192,7 @@ class MainCockpit(QMainWindow):
         Constructs Left Column (Communications Core via Card Stack) 
         and Right Column (Metrics & Matrices).
         """
+        
         # =====================================================
         # TOP SYSTEM ROW: Unified Header Strip
         # =====================================================
@@ -189,7 +214,7 @@ class MainCockpit(QMainWindow):
             "Global Live Feed Chat", 
             "Faction Live Feed Chat", 
             "Admin Command Console", 
-            "Active Logs"
+            "Active System DEBUG Logs"
         ])
         self.feed_selector.currentTextChanged.connect(self.toggle_console_visibility)
         self.left_column.addWidget(self.feed_selector)
@@ -346,13 +371,13 @@ class MainCockpit(QMainWindow):
             "Global Live Feed Chat": 0,
             "Faction Live Feed Chat": 1,
             "Admin Command Console": 2,
-            "Active Logs": 3
+            "Active System DEBUG Logs": 3
         }
         idx = mapping.get(selected_text, 0)
         self.feed_stack.setCurrentIndex(idx)
 
         # Makes Input Control Context-aware
-        active_indices = [0, 1, 2]
+        active_indices = [0, 1, 2, 3]
         is_active = idx in active_indices
         self.cmd_input.setVisible(is_active)
         self.execute_btn.setVisible(is_active)
@@ -548,6 +573,7 @@ class MainCockpit(QMainWindow):
         Dynamically strips login banners and network noise from CommandPipe responses
         without destroying raw command text formatting.
         """
+        
         # Strict low-level system junk to block
         noise_triggers = [
             "Thread 'TelnetClient", "ManagedId", "ThreadId",
@@ -608,6 +634,18 @@ class MainCockpit(QMainWindow):
         else:
             self.telemetry_widget.lbl_target_ip.setText("Target IP: Not Configured")
 
+    def update_console(self, text, is_outbound=False, is_banner=False):
+        """Manager: Appends one atomic block at a time."""
+                
+        if is_banner:
+            # Banner styling (lines after)
+            self.console.append(text)
+            self.console.append("-" * 40)
+        else:
+            # Command output styling
+            prefix = "[OUT] " if is_outbound else ""
+            self.console.append(f"{prefix}{text}")
+
     # --- Close & Shutdown ---
 
     def closeEvent(self, event):
@@ -636,3 +674,4 @@ class MainCockpit(QMainWindow):
         
         # Accept the event to proceed with closing
         event.accept()
+
