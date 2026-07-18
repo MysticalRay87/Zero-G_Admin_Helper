@@ -7,7 +7,7 @@ import select
 import time
 import threading
 from PyQt6.QtCore import QThread, pyqtSignal
-from features.dashboard.telemetry_parser import TelemetryParser
+from features.dashboard.telemetry_parser import TelemetryParser, MsgType
 from enum import Enum
 
 telemetry_lock = threading.Lock()
@@ -78,9 +78,18 @@ class TelemetryWorker(QThread):
             # -------------------------------------------------------------
             elif self.state == WorkerState.CONNECTING:
                 try:
+                    ''' MANDATORY CLEANUP: If a socket exists, kill it completely 
+                    before attempting a new handshake to prevent session conflicts'''
+                    if self.socket:
+                        try:
+                            self.socket.shutdown(socket.SHUT_RDWR)
+                            self.socket.close()
+                        except:
+                            pass
+                        self.socket = None
                     self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     self.socket.settimeout(10.0)
-                    print(f"[DEBUG] Attempting connection to {self.host}:{self.port}...")
+                    print(f"[DEBUG] Attempting SINGLE connection to {self.host}:{self.port}...")
                     
                     self.socket.connect((self.host, int(self.port)))
                     self.connection_status.emit(True)
@@ -120,9 +129,8 @@ class TelemetryWorker(QThread):
             # STATE: STREAMING - Passive Read Loop
             # -------------------------------------------------------------
             elif self.state == WorkerState.STREAMING:
-                # Force a snapshot of online players upon first entry
-                print("[DEBUG] STREAMING activated. Requesting player list snapshot...")
-                self.write_command("plys")
+                # [DEPRECATED] plys command removed to prevent socket flood/buffer overflow
+                print("[DEBUG] STREAMING activated. Waiting for heartbeat for passive population.")
 
                 self._perform_streaming()
                 # If _perform_streaming exits, we lost the stream
@@ -181,6 +189,11 @@ class TelemetryWorker(QThread):
                 # 1. Route through the token parser FIRST
                 msg_type, data = self.parser.parse(line)
 
+                # Triggers plys command exactly once after first heartbeat metric capture
+                if msg_type == MsgType.METRIC and not hasattr(self, 'registry_synced'):
+                    self.write_command("plys")
+                    self.registry_synced = True
+
                 # 2. If parser flags it as NOISE, drop it completely
                 if msg_type == "NOISE":
                     continue 
@@ -190,16 +203,18 @@ class TelemetryWorker(QThread):
 
                 # --- SIGNAL DISSEMINATION ---
                 if msg_type == "PLAYER_JOIN":
-                    print(f"[DEBUG] PlayerJoin: Emitting Player ID/Name Signal: {data}")
                     self.signal_player_join.emit(data)
+                    print(f"[DEBUG] PlayerJoin: Emitting Player ID/Name Signal: {data}")
+                elif msg_type == "STATUS_REGISTRY":
+                    # PASSIVE POPULATION: Emits all players detected in heartbeat status
+                    for player in data:
+                        self.signal_player_join.emit({'id': player['id'], 'name': player['name']})
+                        print(f"[DEBUG] RegistrySync: Emitting Player: {player['name']}")
                 elif msg_type == "GLOBAL_CHAT":
-                    print(f"[DEBUG] GlobalChat: Emitting GlobalChat Signal: {data}")
                     self.signal_global_chat.emit(data)
                 elif msg_type == "FACTION_CHAT":
-                    print(f"[DEBUG] FactionChat: Emitting FactionChat Signal: {data}")
                     self.signal_faction_chat.emit(data)
                 elif msg_type == "METRIC":
-                    print(f"[DEBUG] METRICS: Emitting METRICS Signal: {data}")
                     self.signal_metrics.emit(data)
                     
             return True

@@ -1,5 +1,14 @@
 import re
 
+class MsgType:
+    PLAYER_JOIN = "PLAYER_JOIN"
+    GLOBAL_CHAT = "GLOBAL_CHAT_CHAT"
+    FACTION_CHAT = "FACTION_CHAT_CHAT"
+    METRIC = "METRIC"
+    STATUS_REGISTRY = "STATUS_REGISTRY"
+    NOISE = "NOISE"
+
+
 class TelemetryParser:
     """Stateless parser for Empyrion server log lines."""
     
@@ -22,6 +31,7 @@ class TelemetryParser:
             
             # Patterns for metrics and uptime (non-chat)
             self.patterns = {
+                "status_registry": re.compile(r"id=(?P<id>\d+) name=(?P<name>.*?) fac=\[(?P<fac>.*?)\] role=(?P<role>.*?) online="),
                 "uptime": re.compile(r"Uptime=(?P<time>[a-zA-Z0-9/s]+)"),
                 "system_metric": re.compile(r"(?P<metric>fps|heap|players)=\s*(?P<value>[^\s,\)]+)", re.IGNORECASE),
                 "player_join": re.compile(r"Got player id: CId=\d+, EId=(?P<id>\d+), .*?/'(?P<name>.*?)'"),
@@ -40,6 +50,14 @@ class TelemetryParser:
         if any(pattern.search(line) for pattern in self.noise_filters):
             return "NOISE", None
         
+        # 2. Registry Sync: Check for the heartbeat registry line
+        status_matches = list(self.patterns["status_registry"].finditer(line))
+        if status_matches:
+            # Extract data from all found matches in the line
+            registry_data = [m.groupdict() for m in status_matches]
+            return MsgType.STATUS_REGISTRY, registry_data
+
+        # 3. Player Join Logic:
         # Check for list output
         list_match = self.patterns["list_entry"].search(line)
         if list_match:
@@ -48,10 +66,10 @@ class TelemetryParser:
         login_match = self.patterns["player_join"].search(line)
         if login_match:
             return "PLAYER_JOIN", login_match.groupdict()
-
-        # 2. Priority Parsing: Multi-pattern routing
-        # This replaces manual if/else blocks with a loop that checks the 
-        # chat_routing dictionary defined in __init__.
+        
+        # 4. Priority Chat Parsing: Multi-pattern routing
+        ''' This replaces manual if/else blocks with a loop that checks the 
+        chat_routing dictionary defined in __init__.'''
         for chat_type, pattern in self.chat_routing.items():
             match = pattern.search(line)
             if match:
@@ -66,10 +84,8 @@ class TelemetryParser:
                     "message": data.get("message", "").strip()
                 }
             
-        # 3. High-Performance Metric Harvesting
+        # 5. High-Performance Metric Harvesting: single-pass evaluation across unified metrics strings
         metrics = {}
-        
-        # Fast, single-pass evaluation across unified metrics strings
         metric_matches = list(self.patterns["system_metric"].finditer(line))
         if metric_matches:
             for match in metric_matches:

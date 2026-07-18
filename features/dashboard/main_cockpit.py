@@ -6,7 +6,7 @@ from PyQt6 import QtCore
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QGridLayout, QFrame, QLabel, QVBoxLayout, 
     QTextEdit, QHBoxLayout, QComboBox, QLineEdit, QPushButton, 
-    QTableWidget, QHeaderView, QStackedWidget
+    QTableWidget, QTableWidgetItem, QHeaderView, QStackedWidget
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPainter, QPixmap
@@ -292,7 +292,7 @@ class MainCockpit(QMainWindow):
         
         self.players_layout.addWidget(self.lbl_players_header)
         self.players_layout.addWidget(self.player_table)
-        self.mid_row_layout.addWidget(self.player_registry, stretch=1)
+        self.mid_row_layout.addWidget(self.player_registry, stretch=2)
 
         self.control_panel = QFrame()
         self.control_panel.setObjectName("ControlPanel")
@@ -301,7 +301,7 @@ class MainCockpit(QMainWindow):
         
         self.matrix_buttons = []
         for row in range(3):
-            for col in range(6):
+            for col in range(4):
                 btn = QPushButton(f"[{row},{col}]")
                 btn.setObjectName("MatrixButton")
                 btn.setSizePolicy(btn.sizePolicy().Policy.Expanding, btn.sizePolicy().Policy.Expanding)
@@ -309,7 +309,7 @@ class MainCockpit(QMainWindow):
                 self.matrix_buttons.append(btn)
                 
         self.mid_row_layout.addWidget(self.control_panel, stretch=1)
-        self.right_column.addLayout(self.mid_row_layout, stretch=3)
+        self.right_column.addLayout(self.mid_row_layout, stretch=2)
 
         # --- Dynamic Stacked Sub-Panels Section Lower Row ---
         self.bottom_row_layout = QHBoxLayout()
@@ -412,8 +412,26 @@ class MainCockpit(QMainWindow):
             self.telemetry_widget.lbl_uptime.repaint()
 
     def handle_player_join(self, data: dict):
-        self.player_map[data['id']] = data['name']
-        print(f"[DEBUG] Registered player {data['name']} with ID {data['id']}")
+        """Adds a player to the internal map and updates the UI Table."""
+        player_id = str(data['id'])
+        player_name = data['name']
+        
+        # 1. Update internal map
+        self.player_map[player_id] = player_name
+        print(f"[DEBUG] Registered player {player_name} with ID {player_id}")
+        
+        # 2. UI Table Update: Find existing or add new row
+        # (Search for the ID in the table to avoid duplicates)
+        items = self.player_table.findItems(player_id, Qt.MatchFlag.MatchExactly)
+        
+        if not items:
+            row = self.player_table.rowCount()
+            self.player_table.insertRow(row)
+            # Assuming Column 0 = Player Name, we can use other columns for status/faction
+            self.player_table.setItem(row, 0, QTableWidgetItem(player_name))
+            # You can map other data from 'data' to columns 1-4 here
+            
+        self.player_table.repaint()
 
     def update_resource_ui(self, resources):
         # Defensive check: ensure resources is a valid dictionary
