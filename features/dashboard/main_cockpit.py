@@ -15,6 +15,7 @@ from features.dashboard.telemetry_worker import TelemetryWorker
 from features.dashboard.resource_worker import ResourcePollingWorker
 from features.dashboard.command_pipe import CommandPipe
 from features.dashboard.log_tee import LogTee
+from data.player_registry import PlayerRegistryPopup
 
 class TelemetryWidget(QFrame):
     """
@@ -203,7 +204,7 @@ class MainCockpit(QMainWindow):
         self.top_header_layout.addStretch()
 
         # =====================================================
-        # LEFT COLUMN (35%): Stacked Communications Engine
+        # LEFT COLUMN: Stacked Communications Engine
         # =====================================================
         self.left_column = QVBoxLayout()
 
@@ -219,7 +220,7 @@ class MainCockpit(QMainWindow):
         self.feed_selector.currentTextChanged.connect(self.toggle_console_visibility)
         self.left_column.addWidget(self.feed_selector)
 
-        # --- (7) Multi-Layer Display Card Deck Stack ---
+        # --- Multi-Layer Display Card Deck Stack ---
         self.feed_stack = QStackedWidget()
         self.feed_stack.setObjectName("FeedStack")
 
@@ -269,7 +270,7 @@ class MainCockpit(QMainWindow):
         self.left_column.addLayout(self.input_layout)
 
         # =====================================================
-        # RIGHT COLUMN (65%): Metrics & Matrices
+        # MIDDLE COLUMN: Metrics
         # =====================================================
         self.right_column = QVBoxLayout()
         self.right_column.setSpacing(15)
@@ -277,13 +278,14 @@ class MainCockpit(QMainWindow):
         # --- Player Matrix & Macros Mid Section ---
         self.mid_row_layout = QHBoxLayout()
 
+        # [LEFT] Player Registry Table
         self.player_registry = QFrame()
         self.player_registry.setObjectName("PlayerRegistry")
         self.players_layout = QVBoxLayout(self.player_registry)
         
-        self.lbl_players_header = QLabel("Players on Server")
+        self.lbl_players_header = QLabel("Players on Server Within the Past 2 Weeks")
         self.lbl_players_header.setObjectName("HeaderLabel")
-        
+
         self.player_table = QTableWidget(0, 5)
         self.player_table.setObjectName("PlayerRegistryTable")
         self.player_table.setHorizontalHeaderLabels(["Player", "Status", "Faction", "System", "Playfield"])
@@ -292,26 +294,50 @@ class MainCockpit(QMainWindow):
         
         self.players_layout.addWidget(self.lbl_players_header)
         self.players_layout.addWidget(self.player_table)
-        self.mid_row_layout.addWidget(self.player_registry, stretch=2)
 
+        # =====================================================
+        # RIGHT COLUMN: Button Matrices
+        # =====================================================
         self.control_panel = QFrame()
         self.control_panel.setObjectName("ControlPanel")
         self.button_grid = QGridLayout(self.control_panel)
         self.button_grid.setContentsMargins(5, 5, 5, 5)
         
+        # --------------------------------------------------------------
+        # Define Buttons Here (Define btn first then add button to grid)
+        #---------------------------------------------------------------
+
+        # Define the Registry Button FIRST
+        self.btn_registry = QPushButton("Complete Player Registry")
+        self.btn_registry.setObjectName("RegistryButton") # Optional: for CSS
+        self.btn_registry.clicked.connect(self.open_complete_registry)
+        
+        # --------------------------------------------------------------
+        # Matrix Buttons (Starting at row 1 to avoid overlapping)
+        # --------------------------------------------------------------
         self.matrix_buttons = []
-        for row in range(3):
+        for row in range(1, 4): # Start at row 1
             for col in range(4):
-                btn = QPushButton(f"[{row},{col}]")
+                btn = QPushButton(f"[{row},{col}]") # Adjusted label
                 btn.setObjectName("MatrixButton")
                 btn.setSizePolicy(btn.sizePolicy().Policy.Expanding, btn.sizePolicy().Policy.Expanding)
                 self.button_grid.addWidget(btn, row, col)
                 self.matrix_buttons.append(btn)
-                
-        self.mid_row_layout.addWidget(self.control_panel, stretch=1)
+
+        # --------------------------------------------------------------
+        # Add Registry Button here starting at the top (spanning all 4 columns)
+        # --------------------------------------------------------------
+        self.button_grid.addWidget(self.btn_registry, 0, 0, 1, 4) 
+      
+        # Assembly: Adding to mid_row_layout in corrected order
+        self.mid_row_layout.addWidget(self.player_registry, stretch=2) # Table Left
+        self.mid_row_layout.addWidget(self.control_panel, stretch=1)    # Matrix Right
         self.right_column.addLayout(self.mid_row_layout, stretch=2)
 
-        # --- Dynamic Stacked Sub-Panels Section Lower Row ---
+
+        # =====================================================
+        # LOWER RIGHT PANEL: Dynamic Sub-Panel
+        # =====================================================
         self.bottom_row_layout = QHBoxLayout()
 
         self.display_fbp = QFrame()
@@ -432,6 +458,17 @@ class MainCockpit(QMainWindow):
             # You can map other data from 'data' to columns 1-4 here
             
         self.player_table.repaint()
+
+    def open_complete_registry(self):
+        """Triggers the display of the Complete Player Registry popup."""
+        try:
+            # Instantiate the popup
+            self.registry_popup = PlayerRegistryPopup(self)
+            # Display it as a modal window
+            self.registry_popup.exec()
+        except Exception as e:
+            print(f"[ERROR] Failed to open Player Registry: {e}")
+
 
     def update_resource_ui(self, resources):
         # Defensive check: ensure resources is a valid dictionary

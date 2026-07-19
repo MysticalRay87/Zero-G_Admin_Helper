@@ -181,6 +181,8 @@ class TelemetryWorker(QThread):
                 line = stream.readline()
                 if not line:
                     print("[DEBUG] Stream EOF detected.")
+                    self.socket.close
+                    self.socket = None
                     return False
                 
                 # Remove (hash) to reactivate Raw Stream Ingestion
@@ -191,8 +193,9 @@ class TelemetryWorker(QThread):
 
                 # Triggers plys command exactly once after first heartbeat metric capture
                 if msg_type == MsgType.METRIC and not hasattr(self, 'registry_synced'):
-                    self.write_command("plys")
-                    self.registry_synced = True
+                    if "pfs=" in str(line).lower():
+                        self.write_command("plys")
+                        self.registry_synced = True
 
                 # 2. If parser flags it as NOISE, drop it completely
                 if msg_type == "NOISE":
@@ -223,8 +226,11 @@ class TelemetryWorker(QThread):
             print(f"[DEBUG] Connection stream severed: {str(e)}")
             return False
         except Exception as e:
-            print(f"[DEBUG] Unhandled exception inside stream controller: {str(e)}")
-            return False
+            if self.socket:
+                self.socket.close()
+                self.socket = None
+                print(f"[DEBUG] Unhandled exception inside stream controller: {str(e)}")
+                return False
         finally:
             stream.close()
 
@@ -237,7 +243,7 @@ class TelemetryWorker(QThread):
         """
         # Ensuring app is currently connected and streaming before attempting I/O
         if self.state != WorkerState.STREAMING or not self.socket:
-            print("[ERROR] Multiplexer: Telemetry socket is not active.")
+            print("[ERROR] Multiplexer Offline: Telemetry socket offline.")
             return False
             
         try:
@@ -249,10 +255,12 @@ class TelemetryWorker(QThread):
                 # Encode command with Windows-style \r\n terminator (GTXGaming requirement)
                 full_cmd = f"{cmd_text.strip()}\r\n".encode('utf-8')
                 self.socket.sendall(full_cmd)
+                time.sleep(0.1)
                 return True
         except Exception as e:
             # Log failure if the socket connection was interrupted
             print(f"[ERROR] Multiplexer injection failed: {e}")
+            self.state = WorkerState.RECOVERY # Trigger controlled recovery
             return False
     
     def stop(self):
