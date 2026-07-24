@@ -292,6 +292,9 @@ class TelemetryWorker(QThread):
                 # Determine online status strictly based on whether we were in the online block
                 is_currently_online = in_online_section
                 status_str = "Online" if is_currently_online else "Offline"
+
+                if is_currently_online:
+                    seen_online_keys.add(lookup_key)
                 
                 # Build the active record
                 comprehensive_entry = {
