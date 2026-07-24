@@ -1,277 +1,263 @@
 # telemetry_worker.py
 
-import json
 import os
-import socket
-import select
 import time
+import socket
+import json
+import paramiko
 import threading
+
 from PyQt6.QtCore import QThread, pyqtSignal
 from features.dashboard.telemetry_parser import TelemetryParser, MsgType
-from enum import Enum
-
-telemetry_lock = threading.Lock()
-
-class WorkerState(Enum):
-    DISCONNECTED = 0
-    CONNECTING = 1
-    AUTHENTICATING = 2
-    STREAMING = 3
-    RECOVERY = 4
 
 class TelemetryWorker(QThread):
-    # Establish signals to communicate data pulses back to the main cockpit UI
+    # Signals for UI communication
     log_received = pyqtSignal(str)
-    connection_status = pyqtSignal(bool)
-    signal_global_chat = pyqtSignal(dict)
-    signal_faction_chat = pyqtSignal(dict)
     signal_metrics = pyqtSignal(dict)
     signal_player_join = pyqtSignal(dict)
+    signal_global_chat = pyqtSignal(dict)
+    signal_faction_chat = pyqtSignal(dict)
+    status_msg = pyqtSignal(str)
+    connection_status = pyqtSignal(bool) # Emit True when FTP is working   
 
-    def __init__(self, config_path="data/server_config.json"):
+    def __init__(self, telnet_config):
         super().__init__()
-        self.config_path = config_path
-        self.is_running = False
-        self.socket = None
+        # Load mirror config
+        with open("data/mirror_config.json", 'r') as f:
+            self.mirror_cfg = json.load(f).get("ftp_settings")
         
-        # Dynamically load destination coordinates and passkey
-        self.host, self.port, self.password = self._load_credentials()
+        self.ftp_cfg = self.mirror_cfg
+        self.local_log = self.mirror_cfg["local_mirror"]
         
-        # Initialize the parser
-        self.parser = TelemetryParser() # Initialize the isolated parser
+        # Primary Telnet settings
+        self.host = telnet_config.get("input_ip")
+        self.port = telnet_config.get("input_port")
+        self.password = telnet_config.get("input_pass")
+        
+        self.parser = TelemetryParser()
         self.running = True
+        print("[DEBUG] TelemetryWorker: Initialization complete.")
+        self.lock = threading.Lock()
 
-    def _load_credentials(self):
-        """Loads networking parameters and authentication keys from local storage safely."""
-        if not os.path.exists(self.config_path):
-            print("[DEBUG] Config not found, defaulting to localhost.")
-            return "127.0.0.1", 30004, ""
-            
+    def sync_logs(self):
+        """Background Sync: Pulls log updates via SFTP."""
         try:
-            with open(self.config_path, 'r') as f:
-                data = json.load(f)
-                ip = data.get("input_ip", "127.0.0.1")
-                port = int(data.get("input_port", 30004))
-                password = data.get("input_pass", "")
-                return ip, port, password
-        except (json.JSONDecodeError, Exception):
-            return "127.0.0.1", 30004, ""
+            transport = paramiko.Transport((self.ftp_cfg["host"], self.ftp_cfg["port"]))
+            transport.connect(username=self.ftp_cfg["user"], password=self.ftp_cfg["pw"])
+            sftp = paramiko.SFTPClient.from_transport(transport)
+            
+            # Get local size for resume
+            local_size = os.path.getsize(self.local_log) if os.path.exists(self.local_log) else 0
+
+            # Open the file on the SERVER
+            with sftp.open(self.ftp_cfg["log_path"], 'rb') as remote_file:
+                remote_file.seek(local_size) # Skip already downloaded bytes
+
+                # Open the file on your LOCAL MACHINE
+                with open(self.local_log, 'ab') as local_file:
+                    while True:
+                        # Read from SERVER, Write to LOCAL
+                        data = remote_file.read(4096)
+                        if not data:
+                            break
+                        local_file.write(data)
+
+            # ... cleanup ...    
+            sftp.close()
+            transport.close()
+        except Exception as e:
+            print(f"[ERROR] SFTP Sync failed: {e}")
 
     def run(self):
         """
-        State-driven background thread for passive telemetry ingestion.
+        Passive Log-Watcher: Tails local mirror.
+        Instruction: Initializes the connection once, then enters the tailing loop.
         """
-        self.is_running = True
-        self.state = WorkerState.DISCONNECTED
-        backoff_delay = 1.0
+        # Initial connection phase
+        print("[DEBUG] TelemetryWorker: Attempting initial log sync...")
+        self.sync_logs()
+        print("[SUCCESS] TelemetryWorker: Log synchronization established.")
+        if os.path.exists(self.local_log):
+            print(f"[DEBUG] Processing mirror file: {self.local_log}")
 
-        while self.is_running:
-            # -------------------------------------------------------------
-            # STATE: DISCONNECTED - Initializing
-            # -------------------------------------------------------------
-            if self.state == WorkerState.DISCONNECTED:
-                print("[DEBUG] State: DISCONNECTED -> CONNECTING")
-                self.state = WorkerState.CONNECTING
+            # --- 1. Open the file ONCE outside all loops ---
+            with open(self.local_log, 'r', encoding='utf-8', errors='ignore') as f:
 
-            # -------------------------------------------------------------
-            # STATE: CONNECTING - Socket setup
-            # -------------------------------------------------------------
-            elif self.state == WorkerState.CONNECTING:
-                try:
-                    ''' MANDATORY CLEANUP: If a socket exists, kill it completely 
-                    before attempting a new handshake to prevent session conflicts'''
-                    if self.socket:
-                        try:
-                            self.socket.shutdown(socket.SHUT_RDWR)
-                            self.socket.close()
-                        except:
-                            pass
-                        self.socket = None
-                    self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    self.socket.settimeout(10.0)
-                    print(f"[DEBUG] Attempting SINGLE connection to {self.host}:{self.port}...")
-                    
-                    self.socket.connect((self.host, int(self.port)))
-                    self.connection_status.emit(True)
-                    print("[DEBUG] State: CONNECTING -> AUTHENTICATING")
-                    
-                    self.state = WorkerState.AUTHENTICATING
-                    backoff_delay = 1.0 # Reset backoff on successful connect
+                # --- 2. SMART STARTUP: Read the last 50 lines instead of skipping everything ---
+                lines = f.readlines()
+                recent_lines = lines[-50:] if len(lines) > 50 else lines
                 
-                except Exception as e:
-                    print(f"[DEBUG] Connection failed: {e}")
-                    self.state = WorkerState.RECOVERY
+                for line in recent_lines:
+                    msg_type, data = self.parser.parse(line)
+                    if msg_type == "METRIC":
+                        self.signal_metrics.emit(data)
+                    elif msg_type == "PLAYER_JOIN":
+                        self.signal_player_join.emit(data)
+                    elif msg_type == "GLOBAL_CHAT":
+                        self.signal_global_chat.emit(data)
+                    elif msg_type == "FACTION_CHAT":
+                        self.signal_faction_chat.emit(data)
 
-            # -------------------------------------------------------------
-            # STATE: AUTHENTICATING - Synchronized Handshake
-            # -------------------------------------------------------------
-            elif self.state == WorkerState.AUTHENTICATING:
-                try:
-                    self.socket.settimeout(5.0)
-                    # Wait for password challenge prompt
-                    response = self.socket.recv(1024)
-                    print(f"[DEBUG] Received Handshake Challenge: {response.strip()}")
-                    
-                    if b"Enter password:" in response:
-                        print("[DEBUG] Password prompt detected. Injecting credentials...")
-                        self.socket.sendall(f"{self.password}\r\n".encode('utf-8'))
-                        self.state = WorkerState.STREAMING
-                        print("[DEBUG] State: AUTHENTICATING -> STREAMING")
-                    else:
-                        print("[DEBUG] Unexpected handshake response. Aborting.")
-                        self.state = WorkerState.RECOVERY
-                
-                except Exception as e:
-                    print(f"[DEBUG] Authentication failure: {e}")
-                    self.state = WorkerState.RECOVERY
+                # 3. Move pointer to the end so we only read new lines from here on to avoid reading legacy data
+                f.seek(0, os.SEEK_END)
 
-            # -------------------------------------------------------------
-            # STATE: STREAMING - Passive Read Loop
-            # -------------------------------------------------------------
-            elif self.state == WorkerState.STREAMING:
-                # [DEPRECATED] plys command removed to prevent socket flood/buffer overflow
-                print("[DEBUG] STREAMING activated. Waiting for heartbeat for passive population.")
+                sync_counter = 0
 
-                self._perform_streaming()
-                # If _perform_streaming exits, we lost the stream
-                print("[DEBUG] State: STREAMING -> RECOVERY")
-                self.state = WorkerState.RECOVERY
+                # 4. SINGLE permanent tailing loop (No outer loops to restart it)
+                while self.running:
+                   
+                    # Periodically pull fresh bytes from remote SFTP every ~5 seconds
+                    sync_counter += 1
+                    if sync_counter >= 0.5:
+                        self.sync_logs()
+                        # print(f"[INFO] Server Live-Log re-sync in progress...")
+                        sync_counter = 0
 
-            # -------------------------------------------------------------
-            # STATE: RECOVERY - Exponential Backoff
-            # -------------------------------------------------------------
-            elif self.state == WorkerState.RECOVERY:
-                self.connection_status.emit(False)
-                if self.socket:
-                    self.socket.close()
-                    self.socket = None
-                
-                print(f"[DEBUG] State: RECOVERY. Sleeping {backoff_delay}s before retry.")
-                time.sleep(backoff_delay)
-                
-                # Increase wait time to prevent GTXGaming flood-ban
-                backoff_delay = min(backoff_delay * 2, 60.0)
-                self.state = WorkerState.DISCONNECTED
+                    line = f.readline()
+                    if not line:
+                        # Before sleeping, check for new logs
+                        time.sleep(1.0)
+                        continue 
 
-        print("[DEBUG] TelemetryWorker: Stream captured.")
+                    # Parse lines and route signals
+                    msg_type, data = self.parser.parse(line)
 
-    def _perform_streaming(self):
-        """
-        Manages the high-speed passive stream reading and signal emission.
-        Uses non-blocking multiplexing to allow safe interface shutdown.
-        Returns True while streaming, False if the stream is broken.
-        """
-        try:
-            # Create the buffered text stream wrapper
-            stream = self.socket.makefile('r', encoding='utf-8', errors='ignore')
-            
-            # Crucial step: Set raw socket to non-blocking mode so readline() doesn't freeze the QThread
-            self.socket.setblocking(False)
-            timeout_seconds = 90.0
-            
-            print("[DEBUG] State: STREAMING - Non-blocking Pipeline open.")
-            
-            while self.is_running:
-                # Use select to wait for data safely without eating 100% CPU core limits
-                ready_to_read, _, _ = select.select([self.socket], [], [], 1.0) # 1-second ticks
-                
-                if not ready_to_read:
-                    continue
-                    
-                line = stream.readline()
-                if not line:
-                    print("[DEBUG] Stream EOF detected.")
-                    self.socket.close
-                    self.socket = None
-                    return False
-                
-                # Remove (hash) to reactivate Raw Stream Ingestion
-                print(line.strip())
-                
-                # 1. Route through the token parser FIRST
-                msg_type, data = self.parser.parse(line)
+                    # 1. Route specific signals
+                    if msg_type == "PLAYER_JOIN":
+                        self.signal_player_join.emit(data)
+                    elif msg_type == "GLOBAL_CHAT":
+                        self.signal_global_chat.emit(data)
+                    elif msg_type == "FACTION_CHAT":
+                        self.signal_faction_chat.emit(data)
+                    elif msg_type == "METRIC":
+                        self.signal_metrics.emit(data)
 
-                # Triggers plys command exactly once after first heartbeat metric capture
-                if msg_type == MsgType.METRIC and not hasattr(self, 'registry_synced'):
-                    if "pfs=" in str(line).lower():
-                        self.write_command("plys")
-                        self.registry_synced = True
-
-                # 2. If parser flags it as NOISE, drop it completely
-                if msg_type == "NOISE":
-                    continue 
-
-                # 3. Emit the clean line to the Active Logs console
-                self.log_received.emit(line.strip())
-
-                # --- SIGNAL DISSEMINATION ---
-                if msg_type == "PLAYER_JOIN":
-                    self.signal_player_join.emit(data)
-                    print(f"[DEBUG] PlayerJoin: Emitting Player ID/Name Signal: {data}")
-                elif msg_type == "STATUS_REGISTRY":
-                    # PASSIVE POPULATION: Emits all players detected in heartbeat status
-                    for player in data:
-                        self.signal_player_join.emit({'id': player['id'], 'name': player['name']})
-                        print(f"[DEBUG] RegistrySync: Emitting Player: {player['name']}")
-                elif msg_type == "GLOBAL_CHAT":
-                    self.signal_global_chat.emit(data)
-                elif msg_type == "FACTION_CHAT":
-                    self.signal_faction_chat.emit(data)
-                elif msg_type == "METRIC":
-                    self.signal_metrics.emit(data)
-                    
-            return True
-
-        except (socket.timeout, socket.error) as e:
-            print(f"[DEBUG] Connection stream severed: {str(e)}")
-            return False
-        except Exception as e:
-            if self.socket:
-                self.socket.close()
-                self.socket = None
-                print(f"[DEBUG] Unhandled exception inside stream controller: {str(e)}")
-                return False
-        finally:
-            stream.close()
+                    # 2. Finally, emit raw log for the console    
+                    if msg_type != MsgType.NOISE:
+                        self.log_received.emit(f"[LOG] {line.strip()}\n")
 
     def write_command(self, cmd_text):
-        """
-        Multiplexer Authority Method:
-        Injects commands into the existing persistent telemetry socket.
-        This allows the CommandPipe to function as a lightweight proxy
-        without needing its own socket connection.
-        """
-        # Ensuring app is currently connected and streaming before attempting I/O
-        if self.state != WorkerState.STREAMING or not self.socket:
-            print("[ERROR] Multiplexer Offline: Telemetry socket offline.")
-            return False
-            
-        try:
-            # Use the global telemetry_lock to ensure atomic socket access.
-            # This prevents sending commands while the read-loop is active.
-            with telemetry_lock:
-                print(f"[DEBUG] Multiplexer: Injecting command: {cmd_text.strip()}")
-                
-                # Encode command with Windows-style \r\n terminator (GTXGaming requirement)
-                full_cmd = f"{cmd_text.strip()}\r\n".encode('utf-8')
-                self.socket.sendall(full_cmd)
-                time.sleep(0.1)
-                return True
-        except Exception as e:
-            # Log failure if the socket connection was interrupted
-            print(f"[ERROR] Multiplexer injection failed: {e}")
-            self.state = WorkerState.RECOVERY # Trigger controlled recovery
-            return False
-    
-    def stop(self):
-        """Gracefully halts the pipeline and forcibly kills the socket."""
-        self.is_running = False
-        if self.socket:
+        """Ephemeral Command Proxy: Executes admin commands with stepped Telnet authentication."""
+        with self.lock: # Ensures only one socket transaction happens at a time
             try:
-                # Tell the server we are done, allowing a clean session cleanup
-                self.socket.shutdown(socket.SHUT_RDWR)
-                self.socket.close()
+                clean_cmd = cmd_text.strip()
+                print(f"[DEBUG] Command Proxy: Handshake connecting to {self.host}:{self.port}...")
+                
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(2.0)
+                    s.connect((self.host, int(self.port)))
+                    
+                    # --- STEP 1: READ THE GREETING ---
+                    try:
+                        initial_greeting = s.recv(1024)
+                        print(f"[DEBUG] Telnet Connected. Server Greeting: {initial_greeting.decode('utf-8', errors='ignore').strip()}")
+                    except socket.timeout:
+                        print("[WARNING] No initial greeting received, proceeding...")
+
+                    # --- STEP 2: SEND PASSWORD ALONE AND WAIT ---
+                    s.sendall(f"{self.password}\r\n".encode('utf-8'))
+                    time.sleep(0.1) # Let the server validate the auth token
+
+                    # --- STEP 3: SEND THE ACTUAL COMMAND AND WAIT ---
+                    print(f"[DEBUG] Injecting command: {clean_cmd}")
+                    s.sendall(f"{clean_cmd}\r\n".encode('utf-8'))
+                    
+                    # --- STEP 4: ACCUMULATE MULTI-LINE STREAM CHUNKS ---
+                    response_data = b""
+                    start_time = time.time()
+                    
+                    # Keep listening until data stops arriving or a strict 1.5s window passes
+                    while (time.time() - start_time) < 1.5:
+                        try:
+                            chunk = s.recv(4096)
+                            if chunk:
+                                response_data += chunk
+                                # Reset timer slightly if active data is still flowing
+                                start_time = time.time() 
+                            else:
+                                break
+                        except socket.timeout:
+                            # Clean exit when the server finishes transmitting data blocks
+                            print(f"[CONNECT LOG] End of socket stream chunk.")
+                            break
+                    
+                    response_str = response_data.decode('utf-8', errors='ignore').strip()
+                    print(f"[DEBUG] Command Proxy Response Received ({len(response_str)} chars)")
+                  
+                    # If the command was a player registry pull, cache it locally
+                    if clean_cmd == "plys":
+                        self.cache_player_registry(response_str)
+
+                    if response_str and hasattr(self, 'status_msg') and self.status_msg:
+                        self.status_msg.emit(response_str)
+
+                    #=================================
+                    # --- RAW RESPONSE DEBUG PRINT ---
+                    #=================================
+                    print("================ [RAW SERVER RESPONSE START] ================")
+                    print(response_str)
+                    print("================ [RAW SERVER RESPONSE END] ================")
+                    
+                    print(f"[DEBUG] Command Proxy Response Received ({len(response_str)} chars)")
+
+                    response_str = response_data.decode('utf-8', errors='ignore').strip()
+                    print(f"[DEBUG] Command Proxy Response Received ({len(response_str)} chars)")
+                    
+                    if response_str and hasattr(self, 'status_msg') and self.status_msg:
+                        self.status_msg.emit(response_str)
+
+                    return True
+                
             except Exception as e:
-                print(f"[DEBUG] Socket cleanup error: {e}")
-        self.quit()
-        self.wait(1000) # Wait up to 1 second for the thread to join
+                print(f"[ERROR] Command Proxy failed: {e}")
+                return False
+
+    def cache_player_registry(self, raw_text):
+        """Parses raw plys response and caches structured player records to disk."""
+        parsed_records = []
+        lines = raw_text.splitlines()
+        
+        for line in lines:
+            stripped = line.strip()
+            if "id=" in stripped and "name=" in stripped:
+                player_id = "-"
+                player_name = "-"
+                faction = "-"
+                role = "Online"
+                
+                tokens = stripped.split()
+                for token in tokens:
+                    if token.startswith("id="):
+                        player_id = token.split("=")[1]
+                    elif token.startswith("name="):
+                        player_name = token.split("=")[1]
+                    elif token.startswith("fac="):
+                        faction = token.split("=")[1].replace("[", "").replace("]", "")
+                    elif token.startswith("role="):
+                        role = token.split("=")[1]
+                
+                # Build row matching your 11-column layout
+                row_data = [
+                    player_name,           # Player Name
+                    faction,               # Faction
+                    role,                  # Faction Role
+                    "---",                 # Playfield (Derived from instance telemetry)
+                    "---",                 # Solar System
+                    "---",                 # Coordinates (E/W, Height, N/S)
+                    player_id,             # Private ID
+                    "Off",                 # Cheat
+                    "NO",                  # Cheater                    
+                    "NO",                  # Banned
+                    "No"                   # Auto-Ban Protection
+                ]
+                parsed_records.append(row_data)
+        
+        # Write out to cache file safely
+        cache_path = "data/player_registry_cache.json"
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        try:
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump(parsed_records, f, indent=4)
+            print(f"[SUCCESS] Cached {len(parsed_records)} player records to {cache_path}")
+        except Exception as e:
+            print(f"[ERROR] Failed to write player registry cache: {e}")

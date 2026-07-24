@@ -1,5 +1,8 @@
+# ZAH.py
+
 import os
 import sys
+import json
 from PyQt6.QtWidgets import QApplication, QDialog
 from PyQt6.QtCore import QEventLoop, QCoreApplication
 
@@ -91,8 +94,20 @@ def main():
     # concluded with an 'Accepted' signal.
     if loader_result == QDialog.DialogCode.Accepted:
         print("[SUCCESS] Loading sequence complete. Launching Main Cockpit.")
-        
-        main_cockpit = MainCockpit()
+        # --- LOAD CONFIGURATION ---
+        config_path = os.path.join(root_dir, "data/server_config.json")
+        try:
+            with open(config_path, "r") as f:
+                app_config = json.load(f)
+            print("[DEBUG] Configuration loaded successfully.")
+        except Exception as e:
+            print(f"[CRITICAL] Failed to load server_config.json: {e}")
+            sys.exit(1)
+        # -------------------------------
+
+        # Pass the loaded config to MainCockpit
+        print("[DEBUG] Passing configuration to MainCockpit...")
+        main_cockpit = MainCockpit(app_config) 
         main_cockpit.show()
 
         # Hand off control to the Main Dashboard event loop

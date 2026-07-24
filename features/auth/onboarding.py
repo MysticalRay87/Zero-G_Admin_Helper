@@ -1,4 +1,4 @@
-# onboarding.py-
+# onboarding.py
 
 import os
 from PyQt6.QtWidgets import QDialog, QLabel, QLineEdit, QComboBox, QPushButton

@@ -1,3 +1,5 @@
+# connection.py
+
 import json
 import os
 import socket

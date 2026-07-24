@@ -1,3 +1,5 @@
+# login.py
+
 import os
 import json
 from PyQt6.QtWidgets import QDialog, QLineEdit, QPushButton, QLabel, QCheckBox

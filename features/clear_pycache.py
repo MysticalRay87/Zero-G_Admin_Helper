@@ -1,3 +1,5 @@
+# clear_pycache.py
+
 import os
 import shutil
 
@@ -5,7 +7,7 @@ def clear_pycache(directory):
     for root, dirs, files in os.walk(directory):
         if '__pycache__' in dirs:
             pycache_path = os.path.join(root, '__pycache__')
-            print(f"Removing: {pycache_path}")
+            # print(f"Removing: {pycache_path}")
             shutil.rmtree(pycache_path)
             dirs.remove('__pycache__')
 

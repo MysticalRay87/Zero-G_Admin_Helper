@@ -1,3 +1,5 @@
+# main_cockpit.py
+
 import os
 import sys
 import json
@@ -15,7 +17,10 @@ from features.dashboard.telemetry_worker import TelemetryWorker
 from features.dashboard.resource_worker import ResourcePollingWorker
 from features.dashboard.command_pipe import CommandPipe
 from features.dashboard.log_tee import LogTee
+from features.network.connection import is_network_ready
 from data.player_registry import PlayerRegistryPopup
+from data.playfield_registry import ActivePlayfieldsPopup
+
 
 class TelemetryWidget(QFrame):
     """
@@ -76,11 +81,13 @@ class MainCockpit(QMainWindow):
     """ Screen 3: Main Administration Cockpit Dashboard.
     Persistent multi-threaded dashboard featuring a fluid layout-retaining data feed engine.
     """
-    def __init__(self, parent=None):
+    def __init__(self, config, parent=None):
         super().__init__(parent)
 
+        # Store configuration for worker access
+        self.config = config
+
         # 1. Base UI Setup (Must happen before widgets exist)
-        print("[DEBUG] MainCockpit: Entering __init__...")
         print("[DEBUG] MainCockpit: Initializing Grid...")
         self.setObjectName("MainCockpitCanvas")
         self.setWindowTitle("Zero-G Admin Helper - Dashboard")
@@ -120,7 +127,7 @@ class MainCockpit(QMainWindow):
         # 7. --- Initialize Workers ---
         print("[DEBUG] MainCockpit: Initializing Workers...")
         # TelemetryWorker acts as the master authority for the socket connection
-        self.telemetry_worker = TelemetryWorker()
+        self.telemetry_worker = TelemetryWorker(config)
         
         # 8. CommandPipe is initialized as a lightweight proxy
         self.command_pipe = CommandPipe()
@@ -132,12 +139,8 @@ class MainCockpit(QMainWindow):
         self.player_map = {} # { "3129": "Manta" }
 
         # 11. --- Signal Bridge Connections ---
-        # Telemetry signal mapping (Using QueuedConnection ensures UI updates happen on main thread)
         self.telemetry_worker.log_received.connect(self.update_console)
-        self.telemetry_worker.connection_status.connect(self.update_server_status, QtCore.Qt.ConnectionType.QueuedConnection)
-        self.telemetry_worker.signal_metrics.connect(self.update_telemetry_ui)
-        self.telemetry_worker.signal_player_join.connect(self.handle_player_join)
-
+        self.telemetry_worker.signal_metrics.connect(self.update_telemetry_ui, QtCore.Qt.ConnectionType.QueuedConnection)
 
         # 12. Chat routing with forced Queueing to prevent thread-safety issues during screen switching
         try:
@@ -187,6 +190,10 @@ class MainCockpit(QMainWindow):
 
         # 20. --- Dynamic Configuration Loading ---
         self.load_network_config()
+
+        # 21. --- Run the network check and update status UI ---
+        network_ready = is_network_ready()
+        self.update_server_status(network_ready)
 
     def setup_zones(self):
         """
@@ -238,7 +245,7 @@ class MainCockpit(QMainWindow):
         self.console = QTextEdit()
         self.console.setObjectName("ConsoleDisplay")
         self.console.setReadOnly(True)
-        self.console.setPlaceholderText("Data stream initializing...")
+        self.console.setPlaceholderText("Data stream initialized, now listening...")
 
         # Card 3: System Logs display container box
         self.system_logs_box = QTextEdit()
@@ -303,31 +310,30 @@ class MainCockpit(QMainWindow):
         self.button_grid = QGridLayout(self.control_panel)
         self.button_grid.setContentsMargins(5, 5, 5, 5)
         
-        # --------------------------------------------------------------
-        # Define Buttons Here (Define btn first then add button to grid)
-        #---------------------------------------------------------------
+        # Dictionary to hold all buttons (Including [1, 1])
+        self.matrix_buttons = {}
 
-        # Define the Registry Button FIRST
-        self.btn_registry = QPushButton("Complete Player Registry")
-        self.btn_registry.setObjectName("RegistryButton") # Optional: for CSS
-        self.btn_registry.clicked.connect(self.open_complete_registry)
-        
         # --------------------------------------------------------------
-        # Matrix Buttons (Starting at row 1 to avoid overlapping)
+        # Matrix Buttons (4x4 layout mapping - Pure layout scaffolding)
         # --------------------------------------------------------------
-        self.matrix_buttons = []
-        for row in range(1, 4): # Start at row 1
-            for col in range(4):
-                btn = QPushButton(f"[{row},{col}]") # Adjusted label
+        for row in range(4): # Rows 0 to 3
+            for col in range(4): # Columns 0 to 3
+                
+                # Special text for [1,1] (Row 0, Col 0), standard coordinates for the rest
+                if row == 0 and col == 0:
+                    btn_text = "Player\nRegistry"
+                else:
+                    btn_text = f"[{row+1},{col+1}]"
+
+                btn = QPushButton(btn_text)
                 btn.setObjectName("MatrixButton")
                 btn.setSizePolicy(btn.sizePolicy().Policy.Expanding, btn.sizePolicy().Policy.Expanding)
-                self.button_grid.addWidget(btn, row, col)
-                self.matrix_buttons.append(btn)
+                
+                # CRITICAL: Route ALL buttons to handle_button_action via lambda
+                btn.clicked.connect(lambda checked, r=row+1, c=col+1: self.handle_matrix_action(r, c))
 
-        # --------------------------------------------------------------
-        # Add Registry Button here starting at the top (spanning all 4 columns)
-        # --------------------------------------------------------------
-        self.button_grid.addWidget(self.btn_registry, 0, 0, 1, 4) 
+                self.button_grid.addWidget(btn, row, col)
+                self.matrix_buttons[(row+1, col+1)] = btn
       
         # Assembly: Adding to mid_row_layout in corrected order
         self.mid_row_layout.addWidget(self.player_registry, stretch=2) # Table Left
@@ -403,15 +409,50 @@ class MainCockpit(QMainWindow):
         self.feed_stack.setCurrentIndex(idx)
 
         # Makes Input Control Context-aware
-        active_indices = [0, 1, 2, 3]
+        active_indices = [0, 1, 2]
         is_active = idx in active_indices
         self.cmd_input.setVisible(is_active)
         self.execute_btn.setVisible(is_active)
+
+    def handle_matrix_action(self, row, col):
+        """
+        Master Controller: Houses the implementation logic for every 
+        button on the 4x4 matrix grid based on its 1-based coordinates.
+        """
+        #======================================
+        # ---Button Implementations Go Here ---
+        #======================================
+
+        # --- Coordinate [1,1]: Open Complete Player Registry ---
+        if row == 1 and col == 1:
+            print("[UI BUTTON] Player Registry Called.")
+            self.update_console("[CMD] Requesting Updated Player Registry list...")
+            self.open_complete_registry()
+            
+        # --- Coordinate [1,2]: Query Active Playfields ---
+        elif row == 1 and col == 2:
+            print("[UI BUTTON] Active Playfields Called")
+            self.update_console("[CMD] Requesting active playfields list...")
+            self.open_active_playfields()
+        
+
+        # New button code layout
+        # elif row == 1 and col == 3:
+            # e.g., Trigger Save All
+            pass
+            
+        # --- Catch-all fallback for any unassigned button ---
+        else:
+            print(f"[SYSTEM] No Macro command assigned to coordinate [{row},{col}].")
+            self.update_console(f"[SYSTEM] No Macro command assigned to coordinate [{row},{col}].")
     
     # --- Telemetry & Data Processing ---
 
-    def update_server_status(self, is_online):
+    def update_server_status(self, is_network_ready):
         """Toggles real-time network presence alerts."""
+        # Clean boolean evaluation
+        is_online = bool(is_network_ready)
+
         if is_online:
             self.telemetry_widget.lbl_server_status.setText("Server Status: ONLINE")
             self.telemetry_widget.lbl_server_status.setStyleSheet("color: #00FF00; font-weight: bold;")
@@ -431,7 +472,7 @@ class MainCockpit(QMainWindow):
             self.telemetry_widget.lbl_players.setText(f"Players: {data['players']}")
             self.telemetry_widget.lbl_players.repaint()
         if 'heap' in data:
-            self.telemetry_widget.lbl_heap.setText(f"Heap: {data['heap']}MB")
+            self.telemetry_widget.lbl_heap.setText(f"Heap: {data['heap']}")
             self.telemetry_widget.lbl_heap.repaint()
         if 'uptime' in data:
             self.telemetry_widget.lbl_uptime.setText(f"Uptime: {data['uptime']}")
@@ -459,15 +500,41 @@ class MainCockpit(QMainWindow):
             
         self.player_table.repaint()
 
+    def request_registry_data(self):
+        """Dispatches 'plys' to the server via the parent cockpit command pipe."""
+        if self.parent_cockpit and hasattr(self.parent_cockpit, 'command_pipe'):
+            self.parent_cockpit.update_console("[CMD] Requesting player registry data...")
+            self.parent_cockpit.command_pipe.send_command("plys")
+
     def open_complete_registry(self):
         """Triggers the display of the Complete Player Registry popup."""
         try:
-            # Instantiate the popup
             self.registry_popup = PlayerRegistryPopup(self)
-            # Display it as a modal window
-            self.registry_popup.exec()
+            self.registry_popup.show()
+            
+            # Automatically request an initial server pull on open
+            self.update_console("[CMD] Requesting player registry data...")
+            self.command_pipe.send_command("plys")
+            
         except Exception as e:
             print(f"[ERROR] Failed to open Player Registry: {e}")
+
+    def open_active_playfields(self):
+        """Triggers the display of the Active Playfields popup window."""
+        try:
+            # Instantiate popup, passing self as parent
+            self.playfield_popup = ActivePlayfieldsPopup(self)                
+            self.command_pipe.status_msg.connect(self.playfield_popup.append_data)
+            
+            # Show the popup window first
+            self.playfield_popup.show()
+            
+            # Request data after window is fully rendered
+            self.update_console("[CMD] Requesting active playfields list...")
+            self.command_pipe.send_command("instances")
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to open Playfields window: {e}")
 
 
     def update_resource_ui(self, resources):
@@ -507,8 +574,10 @@ class MainCockpit(QMainWindow):
         full_block = "\n".join(self.response_buffer)
         self.response_buffer = [] # Clear for next event
         
-        # Apply your filtering and formatting logic here
-        self.update_console(full_block)
+        # Explicitely writes block to console widget
+        if hasattr(self, 'console'):
+            # Apply your filtering and formatting logic here
+            self.update_console(full_block)
 
     # --- Chat Handler ---
 
@@ -662,6 +731,17 @@ class MainCockpit(QMainWindow):
             filtered_lines.append(stripped)
             
         sanitized_block = "\n".join(filtered_lines)
+
+        if sanitized_block:
+            # --- ROUTE TO PLAYER REGISTRY POPUP IF VISIBLE ---
+            if hasattr(self, 'registry_popup') and self.registry_popup and self.registry_popup.isVisible():
+                if "Global players list:" in sanitized_block or "id=" in sanitized_block:
+                    self.registry_popup.ingest_raw_response(sanitized_block)
+
+        if sanitized_block:
+            # --- ROUTE TO POPUP IF OPEN ---
+            if hasattr(self, 'playfield_popup') and self.playfield_popup and self.playfield_popup.isVisible():
+                self.playfield_popup.append_data(sanitized_block)
         
         if sanitized_block:
             self.response_buffer.append(sanitized_block)

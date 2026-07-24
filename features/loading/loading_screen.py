@@ -1,3 +1,5 @@
+# loading_screen.py
+
 import os
 import sys
 from PyQt6.QtWidgets import QDialog, QApplication

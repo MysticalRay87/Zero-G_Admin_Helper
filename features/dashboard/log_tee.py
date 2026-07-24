@@ -1,3 +1,5 @@
+# log_tee.py
+
 import sys
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -16,13 +18,18 @@ class LogTee(QObject):
         
         self._is_writing = True
         try:
-            # Write to terminal once
             self.terminal.write(text)
             self.terminal.flush()
             
-            # Emit to GUI
-            if text.strip():
-                self.new_log.emit(text.strip())
+            # Process text chunk for the GUI console view
+            if text:
+                # Split multi-line blocks so each line hits the signal independently
+                for line in text.splitlines():
+                    cleaned_line = line.strip()
+                    if cleaned_line:
+                        if not any(tag in cleaned_line for tag in ["[TRACE]", "[DEBUG] Line parsed"]):
+                            formatted_line = f"[LOG] {cleaned_line}\n"
+                            self.new_log.emit(formatted_line)
         finally:
             self._is_writing = False
 
