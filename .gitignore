@@ -13,6 +13,9 @@ __pycache__/
 data/
 *.json
 
+# Allow Python files inside the data directory
+!data/*.py
+
 # Exclude Token Data
 git_token.txt
 
