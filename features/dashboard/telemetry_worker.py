@@ -182,14 +182,14 @@ class TelemetryWorker(QThread):
                             break
                     
                     response_str = response_data.decode('utf-8', errors='ignore').strip()
-                    print(f"[DEBUG] Command Proxy Response Received ({len(response_str)} chars)")
-                  
-                    # If the command was a player registry pull, cache it locally
-                    if clean_cmd == "plys":
-                        self.cache_player_registry(response_str)
-
-                    if response_str and hasattr(self, 'status_msg') and self.status_msg:
-                        self.status_msg.emit(response_str)
+                print(f"[DEBUG] Command Proxy Response Received ({len(response_str)} chars)")
+                
+                # --- TRIGGER COMPREHENSIVE CACHE WRITER ON PLYS CALL ---
+                if clean_cmd == "plys":
+                    self.update_comprehensive_player_cache(response_str)
+                
+                if response_str and hasattr(self, 'status_msg') and self.status_msg:
+                    self.status_msg.emit(response_str)
 
                     #=================================
                     # --- RAW RESPONSE DEBUG PRINT ---
@@ -212,18 +212,53 @@ class TelemetryWorker(QThread):
                 print(f"[ERROR] Command Proxy failed: {e}")
                 return False
 
-    def cache_player_registry(self, raw_text):
-        """Parses raw plys response and caches structured player records to disk."""
-        parsed_records = []
-        lines = raw_text.splitlines()
+    def update_comprehensive_player_cache(self, raw_telnet_text):
+        """
+        Parses raw telnet plys data and synchronizes a comprehensive 
+        dictionary-based JSON cache on disk, prioritizing cached faction and role data.
+        """
+        cache_path = "data/player_registry_cache.json"
+        
+        # Load existing records to preserve fields like coordinates, custom roles, and factions
+        existing_records = {}
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, 'r', encoding='utf-8') as f:
+                    old_data = json.load(f)
+                    for entry in old_data:
+                        key = entry.get("private_id") or entry.get("player_name")
+                        if key:
+                            existing_records[key] = entry
+            except Exception as e:
+                print(f"[WARNING] Could not read existing player cache: {e}")
+
+        # Track keys processed in this live server poll
+        seen_online_keys = set()
+        all_parsed_keys = set()
+        active_entries_map = {}
+        all_entries_map = {}
+        
+        lines = raw_telnet_text.splitlines()
+        in_online_section = False  # --- Gate flag for the active list ---
+
         
         for line in lines:
             stripped = line.strip()
-            if "id=" in stripped and "name=" in stripped:
+
+            # Detect entry into the active online players section
+            if "Global online players list:" in stripped:
+                in_online_section = True
+                continue
+            elif "Global players list:" in stripped:
+                in_online_section = False
+                continue
+
+            # Process player tokens ONLY if we are strictly inside the active online block
+            if in_online_section and "id=" in stripped and "name=" in stripped:
                 player_id = "-"
                 player_name = "-"
-                faction = "-"
-                role = "Online"
+                parsed_faction = "-"
+                parsed_role = "Member"
                 
                 tokens = stripped.split()
                 for token in tokens:
@@ -232,32 +267,75 @@ class TelemetryWorker(QThread):
                     elif token.startswith("name="):
                         player_name = token.split("=")[1]
                     elif token.startswith("fac="):
-                        faction = token.split("=")[1].replace("[", "").replace("]", "")
+                        extracted_fac = token.split("=")[1].replace("[", "").replace("]", "")
+                        if "Priv" in extracted_fac:
+                            parsed_faction = "None"
+                        else:
+                            parsed_faction = extracted_fac
                     elif token.startswith("role="):
-                        role = token.split("=")[1]
+                        parsed_role = token.split("=")[1]
                 
-                # Build row matching your 11-column layout
-                row_data = [
-                    player_name,           # Player Name
-                    faction,               # Faction
-                    role,                  # Faction Role
-                    "---",                 # Playfield (Derived from instance telemetry)
-                    "---",                 # Solar System
-                    "---",                 # Coordinates (E/W, Height, N/S)
-                    player_id,             # Private ID
-                    "Off",                 # Cheat
-                    "NO",                  # Cheater                    
-                    "NO",                  # Banned
-                    "No"                   # Auto-Ban Protection
-                ]
-                parsed_records.append(row_data)
+                # If faction resolved to None, ensure role is Member
+                if parsed_faction == "None":
+                    parsed_role = "Member"
+                
+                lookup_key = player_id if player_id != "-" else player_name
+                all_parsed_keys.add(lookup_key)
+                
+                # Fetch existing record from disk to pull cached overrides
+                base_record = existing_records.get(lookup_key, {})
+                
+                # --- PRIORITIZE CACHED VALUES IF THEY EXIST ---
+                final_faction = base_record.get("faction") if base_record.get("faction") else parsed_faction
+                final_role = base_record.get("role") if base_record.get("role") else parsed_role
+
+                # Determine online status strictly based on whether we were in the online block
+                is_currently_online = in_online_section
+                status_str = "Online" if is_currently_online else "Offline"
+                
+                # Build the active record
+                comprehensive_entry = {
+                    "active": status_str,
+                    "player_name": player_name,
+                    "faction": final_faction,
+                    "role": final_role,
+                    "playfield": base_record.get("playfield", "Unknown"),
+                    "solar_system": base_record.get("solar_system", "Unknown"),
+                    "coordinates": base_record.get("coordinates", "-"),
+                    "private_id": player_id,
+                    "cheat": base_record.get("cheat", "Off"),
+                    "cheater": base_record.get("cheater", "No"),
+                    "banned": base_record.get("banned", "No"),
+                    "auto_ban_protection": base_record.get("auto_ban_protection", "Active"),
+                    "stats": base_record.get("stats", {"playtime": "0h", "bases": 0, "ships": 0}),
+                    "inventory": base_record.get("inventory", {})
+                }
+
+                # If they are online, they take precedence for active status
+                if is_currently_online or lookup_key not in all_entries_map:
+                    all_entries_map[lookup_key] = comprehensive_entry
+
+        # Compile final list: update players, and mark missing historical players as Offline
+        final_records = []
+        for key, entry in all_entries_map.items():
+            # If they were in the global list but NOT seen in the online section, ensure they are marked Offline
+            if key not in seen_online_keys:
+                entry["active"] = "Offline"
+            final_records.append(entry)
+            
+        # Also preserve any older historical records not caught in this specific plys dump
+        for key, old_entry in existing_records.items():
+            if key not in all_parsed_keys:
+                old_entry["active"] = "Offline"
+                # Avoid duplicates
+                if not any(r.get("private_id") == old_entry.get("private_id") for r in final_records):
+                    final_records.append(old_entry)
         
-        # Write out to cache file safely
-        cache_path = "data/player_registry_cache.json"
+        # Write the comprehensive dataset back to disk
         os.makedirs(os.path.dirname(cache_path), exist_ok=True)
         try:
             with open(cache_path, 'w', encoding='utf-8') as f:
-                json.dump(parsed_records, f, indent=4)
-            print(f"[SUCCESS] Cached {len(parsed_records)} player records to {cache_path}")
+                json.dump(final_records, f, indent=4)
+            print(f"[SUCCESS] Comprehensive player cache synced. Online: {len(active_entries_map)}, Total: {len(final_records)}")
         except Exception as e:
-            print(f"[ERROR] Failed to write player registry cache: {e}")
+            print(f"[ERROR] Failed to write comprehensive player cache: {e}")
