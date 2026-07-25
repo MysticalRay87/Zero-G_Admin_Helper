@@ -414,6 +414,8 @@ class MainCockpit(QMainWindow):
         self.cmd_input.setVisible(is_active)
         self.execute_btn.setVisible(is_active)
 
+    # --- User Actions & Matrix Control Routing ---
+
     def handle_matrix_action(self, row, col):
         """
         Master Controller: Houses the implementation logic for every 
@@ -445,6 +447,80 @@ class MainCockpit(QMainWindow):
         else:
             print(f"[SYSTEM] No Macro command assigned to coordinate [{row},{col}].")
             self.update_console(f"[SYSTEM] No Macro command assigned to coordinate [{row},{col}].")
+
+    def open_complete_registry(self):
+        """Triggers the display of the Complete Player Registry popup."""
+        try:
+            self.registry_popup = PlayerRegistryPopup(self)
+            self.registry_popup.show()
+            
+            # Automatically request an initial server pull on open
+            self.update_console("[CMD] Requesting player registry data...")
+            self.command_pipe.send_command("plys")
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to open Player Registry: {e}")
+
+    def open_active_playfields(self):
+        """Triggers the display of the Active Playfields popup window."""
+        try:
+            # Instantiate popup, passing self as parent
+            self.playfield_popup = ActivePlayfieldsPopup(self)                
+            self.command_pipe.status_msg.connect(self.playfield_popup.append_data)
+            
+            # Show the popup window first
+            self.playfield_popup.show()
+            
+            # Request data after window is fully rendered
+            self.update_console("[CMD] Requesting active playfields list...")
+            self.command_pipe.send_command("instances")
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to open Playfields window: {e}")
+
+    def dispatch_cmd(self):
+        """
+        Controller: Connects the GUI Input Box to the CommandPipe Buffer.
+        Context-aware: Automatically prepends the correct chat syntax based on the active tab.
+        """
+        text = self.cmd_input.text().strip()
+        if not text:
+            self.update_console("[SYSTEM] Empty command ignored.")
+            return
+        
+        # Determine target based on the active QStackedWidget index (self.feed_stack)
+        current_idx = self.feed_stack.currentIndex()
+        
+        if current_idx == 0:
+            command = f"say '{text}'\n"
+            ui_display = f"[GLOBAL] You: {text}"
+            target_box = self.global_chat_box
+        elif current_idx == 1:
+            command = f"faction say '{text}'\n"
+            ui_display = f"[FACTION] You: {text}"
+            target_box = self.faction_chat_box
+        elif current_idx == 2:
+            command = f"{text}\n"
+            ui_display = f"[CMD] {text}"
+            target_box = self.console
+        else:
+            # Index 3: Logs (Read-only, maybe ignore or treat as raw)
+            self.update_console("[SYSTEM] Cannot send messages to log viewer.")
+            return
+           
+        # Queue for safe, throttled execution (500ms delay enforced by pipe)
+        if hasattr(self, 'command_pipe'):
+            self.command_pipe.send_command(command)
+            target_box.append(ui_display) # Update UI locally
+            self.cmd_input.clear()
+        else:
+            self.console.append("[ERROR] CommandPipe not initialized.")
+
+    def request_registry_data(self):
+        """Dispatches 'plys' to the server via the parent cockpit command pipe."""
+        if self.parent_cockpit and hasattr(self.parent_cockpit, 'command_pipe'):
+            self.parent_cockpit.update_console("[CMD] Requesting player registry data...")
+            self.parent_cockpit.command_pipe.send_command("plys")
     
     # --- Telemetry & Data Processing ---
 
@@ -478,6 +554,23 @@ class MainCockpit(QMainWindow):
             self.telemetry_widget.lbl_uptime.setText(f"Uptime: {data['uptime']}")
             self.telemetry_widget.lbl_uptime.repaint()
 
+    def update_resource_ui(self, resources):
+        # Defensive check: ensure resources is a valid dictionary
+        if not isinstance(resources, dict):
+            return
+
+        # Use safe defaults and explicit float casting
+        try:
+            cpu_val = float(resources.get("cpu", 0.0))
+            ram_val = float(resources.get("ram", 0.0))
+        except (ValueError, TypeError):
+            cpu_val = 0.0
+            ram_val = 0.0
+
+        # Apply to UI
+        self.telemetry_widget.lbl_server_cpu.setText(f"CPU: {cpu_val:.2f}%")
+        self.telemetry_widget.lbl_server_ram.setText(f"RAM: {ram_val:.1f}%")
+
     def handle_player_join(self, data: dict):
         """Adds a player to the internal map and updates the UI Table."""
         player_id = str(data['id'])
@@ -500,86 +593,7 @@ class MainCockpit(QMainWindow):
             
         self.player_table.repaint()
 
-    def request_registry_data(self):
-        """Dispatches 'plys' to the server via the parent cockpit command pipe."""
-        if self.parent_cockpit and hasattr(self.parent_cockpit, 'command_pipe'):
-            self.parent_cockpit.update_console("[CMD] Requesting player registry data...")
-            self.parent_cockpit.command_pipe.send_command("plys")
-
-    def open_complete_registry(self):
-        """Triggers the display of the Complete Player Registry popup."""
-        try:
-            self.registry_popup = PlayerRegistryPopup(self)
-            self.registry_popup.show()
-            
-            # Automatically request an initial server pull on open
-            self.update_console("[CMD] Requesting player registry data...")
-            self.command_pipe.send_command("plys")
-            
-        except Exception as e:
-            print(f"[ERROR] Failed to open Player Registry: {e}")
-
-    def open_active_playfields(self):
-        """Triggers the display of the Active Playfields popup window."""
-        try:
-            # Instantiate popup, passing self as parent
-            self.playfield_popup = ActivePlayfieldsPopup(self)                
-            self.command_pipe.status_msg.connect(self.playfield_popup.append_data)
-            
-            # Show the popup window first
-            self.playfield_popup.show()
-            
-            # Request data after window is fully rendered
-            self.update_console("[CMD] Requesting active playfields list...")
-            self.command_pipe.send_command("instances")
-            
-        except Exception as e:
-            print(f"[ERROR] Failed to open Playfields window: {e}")
-
-
-    def update_resource_ui(self, resources):
-        # Defensive check: ensure resources is a valid dictionary
-        if not isinstance(resources, dict):
-            return
-
-        # Use safe defaults and explicit float casting
-        try:
-            cpu_val = float(resources.get("cpu", 0.0))
-            ram_val = float(resources.get("ram", 0.0))
-        except (ValueError, TypeError):
-            cpu_val = 0.0
-            ram_val = 0.0
-
-        # Apply to UI
-        self.telemetry_widget.lbl_server_cpu.setText(f"CPU: {cpu_val:.2f}%")
-        self.telemetry_widget.lbl_server_ram.setText(f"RAM: {ram_val:.1f}%")
-
-    def update_console(self, text, is_outbound=False, is_banner=False):
-        """Manager: Appends one atomic block at a time."""
-               
-        if is_banner:
-            # Banner styling (lines after)
-            self.console.append(text)
-            self.console.append("-" * 40)
-        else:
-            # Command output styling
-            prefix = "[OUT] " if is_outbound else ""
-            self.console.append(f"{prefix}{text}")
-
-    def _flush_console(self):
-        """This runs once after data stops arriving, processing the block as one unit."""
-        if not self.response_buffer:
-            return
-            
-        full_block = "\n".join(self.response_buffer)
-        self.response_buffer = [] # Clear for next event
-        
-        # Explicitely writes block to console widget
-        if hasattr(self, 'console'):
-            # Apply your filtering and formatting logic here
-            self.update_console(full_block)
-
-    # --- Chat Handler ---
+    # --- Chat Handlers ---
 
     def switch_chat_tab(self, tab_index):
             """Switches the visible chat box using the stacked widget index."""
@@ -651,45 +665,7 @@ class MainCockpit(QMainWindow):
         sb = self.faction_chat_box.verticalScrollBar()
         sb.setValue(sb.maximum())
 
-    # --- Command Execution ---
-
-    def dispatch_cmd(self):
-        """
-        Controller: Connects the GUI Input Box to the CommandPipe Buffer.
-        Context-aware: Automatically prepends the correct chat syntax based on the active tab.
-        """
-        text = self.cmd_input.text().strip()
-        if not text:
-            self.update_console("[SYSTEM] Empty command ignored.")
-            return
-        
-        # Determine target based on the active QStackedWidget index (self.feed_stack)
-        current_idx = self.feed_stack.currentIndex()
-        
-        if current_idx == 0:
-            command = f"say '{text}'\n"
-            ui_display = f"[GLOBAL] You: {text}"
-            target_box = self.global_chat_box
-        elif current_idx == 1:
-            command = f"faction say '{text}'\n"
-            ui_display = f"[FACTION] You: {text}"
-            target_box = self.faction_chat_box
-        elif current_idx == 2:
-            command = f"{text}\n"
-            ui_display = f"[CMD] {text}"
-            target_box = self.console
-        else:
-            # Index 3: Logs (Read-only, maybe ignore or treat as raw)
-            self.update_console("[SYSTEM] Cannot send messages to log viewer.")
-            return
-           
-        # Queue for safe, throttled execution (500ms delay enforced by pipe)
-        if hasattr(self, 'command_pipe'):
-            self.command_pipe.send_command(command)
-            target_box.append(ui_display) # Update UI locally
-            self.cmd_input.clear()
-        else:
-            self.console.append("[ERROR] CommandPipe not initialized.")
+    # --- Console & Stream Responses ---
 
     def handle_console_response(self, response):
         """
@@ -747,6 +723,31 @@ class MainCockpit(QMainWindow):
             self.response_buffer.append(sanitized_block)
             self.flush_timer.start(50)
 
+    def update_console(self, text, is_outbound=False, is_banner=False):
+        """Manager: Appends one atomic block at a time."""
+               
+        if is_banner:
+            # Banner styling (lines after)
+            self.console.append(text)
+            self.console.append("-" * 40)
+        else:
+            # Command output styling
+            prefix = "[OUT] " if is_outbound else ""
+            self.console.append(f"{prefix}{text}")
+
+    def _flush_console(self):
+        """This runs once after data stops arriving, processing the block as one unit."""
+        if not self.response_buffer:
+            return
+            
+        full_block = "\n".join(self.response_buffer)
+        self.response_buffer = [] # Clear for next event
+        
+        # Explicitely writes block to console widget
+        if hasattr(self, 'console'):
+            # Apply your filtering and formatting logic here
+            self.update_console(full_block)
+
     # --- Error Handling ---
 
     def handle_pipe_error(self, err_msg):
@@ -768,18 +769,6 @@ class MainCockpit(QMainWindow):
                 self.telemetry_widget.lbl_target_ip.setText(f"Target IP: {ip}")
         else:
             self.telemetry_widget.lbl_target_ip.setText("Target IP: Not Configured")
-
-    def update_console(self, text, is_outbound=False, is_banner=False):
-        """Manager: Appends one atomic block at a time."""
-                
-        if is_banner:
-            # Banner styling (lines after)
-            self.console.append(text)
-            self.console.append("-" * 40)
-        else:
-            # Command output styling
-            prefix = "[OUT] " if is_outbound else ""
-            self.console.append(f"{prefix}{text}")
 
     # --- Close & Shutdown ---
 

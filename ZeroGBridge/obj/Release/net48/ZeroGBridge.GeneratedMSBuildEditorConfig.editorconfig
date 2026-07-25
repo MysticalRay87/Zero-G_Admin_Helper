@@ -1,0 +1,5 @@
+is_global = true
+build_property.RootNamespace = ZeroGBridge
+build_property.ProjectDir = /mnt/Zero-G_Files/Zero-G_Admin_Helper/ZeroGBridge/
+build_property.EnableComHosting = 
+build_property.EnableGeneratedComInterfaceComImportInterop = 

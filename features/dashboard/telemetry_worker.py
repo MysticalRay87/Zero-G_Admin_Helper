@@ -320,19 +320,28 @@ class TelemetryWorker(QThread):
 
         # Compile final list: update players, and mark missing historical players as Offline
         final_records = []
-        for key, entry in all_entries_map.items():
-            # If they were in the global list but NOT seen in the online section, ensure they are marked Offline
-            if key not in seen_online_keys:
-                entry["active"] = "Offline"
-            final_records.append(entry)
-            
-        # Also preserve any older historical records not caught in this specific plys dump
+        # --- ROBUST DEDUPLICATION & SYNC PASS ---
+        master_registry = {}
+        
+        # 1. Load old records first to preserve history, coordinates, and custom overrides
         for key, old_entry in existing_records.items():
-            if key not in all_parsed_keys:
-                old_entry["active"] = "Offline"
-                # Avoid duplicates
-                if not any(r.get("private_id") == old_entry.get("private_id") for r in final_records):
-                    final_records.append(old_entry)
+            master_registry[key] = old_entry
+
+        # 2. Add or update all players parsed in the current plys dump
+        for key, entry in all_entries_map.items():
+            # If they were seen in the online section, mark Online, else Offline
+            if key in seen_online_keys:
+                entry["active"] = "Online"
+            else:
+                entry["active"] = "Offline"
+            master_registry[key] = entry  # Overwrites cleanly, preventing duplicates
+            
+        # 3. Ensure any historical player not in this specific dump is marked Offline
+        for key, entry in master_registry.items():
+            if key not in seen_online_keys and key not in all_parsed_keys:
+                entry["active"] = "Offline"
+
+        final_records = list(master_registry.values())
         
         # Write the comprehensive dataset back to disk
         os.makedirs(os.path.dirname(cache_path), exist_ok=True)
