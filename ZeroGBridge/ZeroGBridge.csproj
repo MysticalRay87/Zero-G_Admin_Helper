@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>ZeroGBridge</AssemblyName>
+    <RootNamespace>ZeroGBridge</RootNamespace>
+    <OutputType>Library</OutputType>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <DefaultItemExcludes>$(DefaultItemExcludes);lib/.EmpyrionAPITools-0-10.0/**;**/.EmpyrionAPITools-0-10.0/**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+
+    <Reference Include="ModApi">
+      <HintPath>libs/ModApi.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+
+    <Reference Include="Assembly-CSharp">
+      <HintPath>libs/Assembly-CSharp.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>libs/Newtonsoft.Json.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+
+  </ItemGroup>
+
+</Project>

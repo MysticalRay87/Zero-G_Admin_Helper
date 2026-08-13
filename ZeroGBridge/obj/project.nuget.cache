@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "lWVRbP6YX3lq8ICnAgfqjtUQiTMk3Oio7klbRZoBkZufqONP0lqoJhK9kMvvOcT32dLrVnQEWmFig/7HGrwIrA==",
+  "success": true,
+  "projectFilePath": "/mnt/Zero-G_Files/Zero-G_Forge/Zero-G_Admin_Helper/ZeroGBridge/ZeroGBridge.csproj",
+  "expectedPackageFiles": [
+    "/home/ray/.nuget/packages/microsoft.netframework.referenceassemblies/1.0.3/microsoft.netframework.referenceassemblies.1.0.3.nupkg.sha512",
+    "/home/ray/.nuget/packages/microsoft.netframework.referenceassemblies.net48/1.0.3/microsoft.netframework.referenceassemblies.net48.1.0.3.nupkg.sha512"
+  ],
+  "logs": []
+}

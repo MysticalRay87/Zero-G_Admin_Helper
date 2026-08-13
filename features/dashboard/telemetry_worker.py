@@ -106,18 +106,15 @@ class TelemetryWorker(QThread):
                 # 4. SINGLE permanent tailing loop (No outer loops to restart it)
                 while self.running:
                    
-                    # Periodically pull fresh bytes from remote SFTP every ~5 seconds
-                    sync_counter += 1
-                    if sync_counter >= 0.5:
-                        self.sync_logs()
-                        # print(f"[INFO] Server Live-Log re-sync in progress...")
-                        sync_counter = 0
-
                     line = f.readline()
                     if not line:
-                        # Before sleeping, check for new logs
-                        time.sleep(1.0)
-                        continue 
+                        # Incremental counter only when we are idling and wating for new logs
+                        sync_counter += 1
+                        if sync_counter >= 5:  # Triggers sync strictly every 5 idle cycles
+                            self.sync_logs()
+                            sync_counter = 0
+                        time.sleep(1.0)  # Sleep briefly to avoid busy waiting
+                        continue
 
                     # Parse lines and route signals
                     msg_type, data = self.parser.parse(line)

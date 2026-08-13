@@ -1,0 +1,10 @@
+/mnt/Zero-G_Files/Zero-G_Forge/Zero-G_Admin_Helper/ZeroGBridge/obj/Debug/net48/ZeroGBridge.csproj.AssemblyReference.cache
+/mnt/Zero-G_Files/Zero-G_Forge/Zero-G_Admin_Helper/ZeroGBridge/obj/Debug/net48/ZeroGBridge.GeneratedMSBuildEditorConfig.editorconfig
+/mnt/Zero-G_Files/Zero-G_Forge/Zero-G_Admin_Helper/ZeroGBridge/obj/Debug/net48/ZeroGBridge.AssemblyInfoInputs.cache
+/mnt/Zero-G_Files/Zero-G_Forge/Zero-G_Admin_Helper/ZeroGBridge/obj/Debug/net48/ZeroGBridge.AssemblyInfo.cs
+/mnt/Zero-G_Files/Zero-G_Forge/Zero-G_Admin_Helper/ZeroGBridge/obj/Debug/net48/ZeroGBridge.csproj.CoreCompileInputs.cache
+/mnt/Zero-G_Files/Zero-G_Forge/Zero-G_Admin_Helper/ZeroGBridge/obj/Debug/net48/ZeroGBridge.sourcelink.json
+/mnt/Zero-G_Files/Zero-G_Forge/Zero-G_Admin_Helper/ZeroGBridge/bin/Debug/net48/ZeroGBridge.dll
+/mnt/Zero-G_Files/Zero-G_Forge/Zero-G_Admin_Helper/ZeroGBridge/bin/Debug/net48/ZeroGBridge.pdb
+/mnt/Zero-G_Files/Zero-G_Forge/Zero-G_Admin_Helper/ZeroGBridge/obj/Debug/net48/ZeroGBridge.dll
+/mnt/Zero-G_Files/Zero-G_Forge/Zero-G_Admin_Helper/ZeroGBridge/obj/Debug/net48/ZeroGBridge.pdb

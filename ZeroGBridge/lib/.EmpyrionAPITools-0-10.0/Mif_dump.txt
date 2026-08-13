@@ -1,0 +1,125 @@
+=== Types containing 'Spawn' in name ===
+---- Eleon.Modding.EntitySpawnInfo ----
+  field Int32 forceEntityId
+  field String playfield
+  field PVector3 pos
+  field PVector3 rot
+  field String name
+  field Byte type
+  field String entityTypeName
+  field String prefabName
+  field String prefabDir
+  field Byte factionGroup
+  field Int32 factionId
+  field String exportedEntityDat
+
+
+=== Types containing 'Entity' in name ===
+---- Eleon.Modding.EntityExportInfo ----
+  field Int32 id
+  field String playfield
+  field String filePath
+  field Boolean isForceUnload
+
+---- Eleon.Modding.EntityInfo ----
+  field Int32 id
+  field Int32 type
+  field PVector3 pos
+
+---- Eleon.Modding.EntitySpawnInfo ----
+  field Int32 forceEntityId
+  field String playfield
+  field PVector3 pos
+  field PVector3 rot
+  field String name
+  field Byte type
+  field String entityTypeName
+  field String prefabName
+  field String prefabDir
+  field Byte factionGroup
+  field Int32 factionId
+  field String exportedEntityDat
+
+---- Eleon.Modding.PlayfieldEntityList ----
+  field String playfield
+  field List`1 entities
+
+
+=== Enums with 'Cmd' or 'Event' in name ===
+---- enum Eleon.Modding.CmdId ----
+  Event_Playfield_Loaded = 0
+  Event_Playfield_Unloaded = 1
+  Request_Playfield_List = 2
+  Event_Playfield_List = 3
+  Request_Playfield_Stats = 4
+  Event_Playfield_Stats = 5
+  Request_Dedi_Stats = 6
+  Event_Dedi_Stats = 7
+  Request_GlobalStructure_List = 8
+  Request_GlobalStructure_Update = 9
+  Event_GlobalStructure_List = 10
+  Request_Structure_Touch = 11
+  Request_Structure_BlockStatistics = 12
+  Event_Structure_BlockStatistics = 13
+  Event_Player_Connected = 14
+  Event_Player_Disconnected = 15
+  Event_Player_ChangedPlayfield = 16
+  Request_Player_Info = 17
+  Event_Player_Info = 18
+  Request_Player_List = 19
+  Event_Player_List = 20
+  Request_Player_GetInventory = 21
+  Request_Player_SetInventory = 22
+  Event_Player_Inventory = 23
+  Request_Player_AddItem = 24
+  Request_Player_Credits = 25
+  Request_Player_SetCredits = 26
+  Request_Player_AddCredits = 27
+  Event_Player_Credits = 28
+  Request_Blueprint_Finish = 29
+  Request_Blueprint_Resources = 30
+  Request_Player_ChangePlayerfield = 31
+  Request_Player_ItemExchange = 32
+  Event_Player_ItemExchange = 33
+  Request_Player_SetPlayerInfo = 34
+  Event_Player_DisconnectedWaiting = 35
+  Request_Entity_Teleport = 36
+  Request_Entity_ChangePlayfield = 37
+  Request_Entity_Destroy = 38
+  Request_Entity_PosAndRot = 39
+  Event_Entity_PosAndRot = 40
+  Event_Faction_Changed = 41
+  Request_Entity_Spawn = 42
+  Request_Get_Factions = 43
+  Event_Get_Factions = 44
+  Event_Statistics = 45
+  Request_NewEntityId = 46
+  Event_NewEntityId = 47
+  Request_AlliancesAll = 48
+  Event_AlliancesAll = 49
+  Request_AlliancesFaction = 50
+  Event_AlliancesFaction = 51
+  Request_Load_Playfield = 52
+  Event_ChatMessage = 53
+  Event_ChatMessageEx = 54
+  Request_ConsoleCommand = 55
+  Request_GetBannedPlayers = 56
+  Event_BannedPlayers = 57
+  Request_InGameMessage_SinglePlayer = 58
+  Request_InGameMessage_AllPlayers = 59
+  Request_InGameMessage_Faction = 60
+  Request_ShowDialog_SinglePlayer = 61
+  Event_DialogButtonIndex = 62
+  Event_Ok = 63
+  Event_Error = 64
+  Event_TraderNPCItemSold = 65
+  Request_Player_GetAndRemoveInventory = 66
+  Event_Player_GetAndRemoveInventory = 67
+  Request_Playfield_Entity_List = 68
+  Event_Playfield_Entity_List = 69
+  Request_Entity_Destroy2 = 70
+  Request_Entity_Export = 71
+  Event_ConsoleCommand = 72
+  Request_Entity_SetName = 73
+  Event_PdaStateChange = 74
+  Event_GameEvent = 75

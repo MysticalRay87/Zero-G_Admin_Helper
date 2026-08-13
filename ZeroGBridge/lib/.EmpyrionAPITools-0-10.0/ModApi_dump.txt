@@ -1,0 +1,131 @@
+Total non-null types: 103
+
+
+=== All non-Unity types ===
+  <PrivateImplementationDetails>
+  <PrivateImplementationDetails>+__StaticArrayInitTypeSize=1402
+  <PrivateImplementationDetails>+__StaticArrayInitTypeSize=548
+  BlockFunction
+  BlockSide
+  BlockSignalType
+  CoreType
+  DeviceTypeName
+  Eleon.MessageData
+  Eleon.Modding.AppFolder
+  Eleon.Modding.ApplicationMode
+  Eleon.Modding.BlockPosColor
+  Eleon.Modding.ChatMessageSentEventHandler
+  Eleon.Modding.DialogActionHandler
+  Eleon.Modding.DialogConfig
+  Eleon.Modding.EntityDelegate
+  Eleon.Modding.GameEventDelegate
+  Eleon.Modding.GamEnteredEventHandler
+  Eleon.Modding.GameState
+  Eleon.Modding.IApplication
+  Eleon.Modding.IBlock
+  Eleon.Modding.IContainer
+  Eleon.Modding.IDevice
+  Eleon.Modding.IDevicePosList
+  Eleon.Modding.IEntity
+  Eleon.Modding.IGui
+  Eleon.Modding.ILcd
+  Eleon.Modding.ILight
+  Eleon.Modding.IMod
+  Eleon.Modding.IModApi
+  Eleon.Modding.INetwork
+  Eleon.Modding.IPda
+  Eleon.Modding.IPlayer
+  Eleon.Modding.IPlayfield
+  Eleon.Modding.IPlayfieldDescr
+  Eleon.Modding.IPortal
+  Eleon.Modding.IScript
+  Eleon.Modding.ISoundPlayer
+  Eleon.Modding.IStructure
+  Eleon.Modding.IStructureTank
+  Eleon.Modding.ITeleporter
+  Eleon.Modding.LockResultCallback
+  Eleon.Modding.ModApiDialogButtons
+  Eleon.Modding.ModApiDialogPosition
+  Eleon.Modding.ModConsts
+  Eleon.Modding.ModDataReceivedDelegate
+  Eleon.Modding.PlayerData
+  Eleon.Modding.PlayerDataReceivedDelegate
+  Eleon.Modding.PlayfieldDelegate
+  Eleon.Modding.ScriptDomain
+  Eleon.Modding.ScriptInstance
+  Eleon.Modding.ScriptType
+  Eleon.Modding.SenderSignal
+  Eleon.Modding.SignalChangedEventHandler
+  Eleon.Modding.SignalFunction
+  Eleon.Modding.SoundPlayMode
+  Eleon.Modding.TeleporterData
+  Eleon.Modding.UpdateDelegate
+  Eleon.Modding.VectorInt3
+  Eleon.MsgChannel
+  Eleon.MsgChannelComparer
+  Eleon.Pda.ActionData
+  Eleon.Pda.ActionData+<>c__DisplayClass115_0
+  Eleon.Pda.ActionData+<>c__DisplayClass116_0
+  Eleon.Pda.ChapterActivationData
+  Eleon.Pda.ChapterActivationData+<>c__DisplayClass84_0
+  Eleon.Pda.ChapterActivationData+<>c__DisplayClass85_0
+  Eleon.Pda.ChapterActivationData+MessageType
+  Eleon.Pda.ChapterCategory
+  Eleon.Pda.ChapterCategoryComparer
+  Eleon.Pda.ChapterData
+  Eleon.Pda.ChapterData+<>c__DisplayClass174_0
+  Eleon.Pda.ChapterData+<>c__DisplayClass175_0
+  Eleon.Pda.ChapterNearPoiUnitData
+  Eleon.Pda.ChapterNearPoiUnitData+<>c__DisplayClass10_0
+  Eleon.Pda.ChapterNearPoiUnitData+<>c__DisplayClass9_0
+  Eleon.Pda.ChapterRestriction
+  Eleon.Pda.GuidingType
+  Eleon.Pda.IParentLink
+  Eleon.Pda.ListRequirement
+  Eleon.Pda.PdaData
+  Eleon.Pda.RepeatData
+  Eleon.Pda.RewardData
+  Eleon.Pda.RewardType
+  Eleon.Pda.ScenarioEventType
+  Eleon.Pda.SignalDescriptor
+  Eleon.Pda.TaskData
+  Eleon.Pda.TaskData+<>c__DisplayClass118_0
+  Eleon.Pda.TaskData+<>c__DisplayClass119_0
+  Eleon.Pda.WaveStartData
+  Eleon.SenderType
+  EntityType
+  FactionData
+  FactionGroup
+  FactionRole
+  GameEventType
+  PlayfieldType
+  SharedUtils
+  SharedUtils+<>c__DisplayClass3_0`1
+  SharedUtils+TmpPropertyInfo
+  SignalBehaviour
+  UnitySourceGeneratedAssemblyMonoScriptTypes_v1
+  UnitySourceGeneratedAssemblyMonoScriptTypes_v1+MonoScriptData
+
+=== Types containing 'GameMod' ===
+  (none)
+
+=== Types containing 'GameAPI' ===
+  (none)
+
+=== Types containing 'Player' ===
+  Eleon.Modding.IPlayer
+  Eleon.Modding.ISoundPlayer
+  Eleon.Modding.PlayerData
+  Eleon.Modding.PlayerDataReceivedDelegate
+
+=== Types containing 'Entity' ===
+  Eleon.Modding.EntityDelegate
+  Eleon.Modding.IEntity
+  EntityType
+
+=== Types containing 'Chat' ===
+  Eleon.Modding.ChatMessageSentEventHandler
+
+=== Enums containing 'Cmd' or 'Event' in name ===
+  Eleon.Pda.ScenarioEventType
+  GameEventType
