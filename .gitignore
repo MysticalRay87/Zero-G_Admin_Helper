@@ -8,6 +8,7 @@ __pycache__/
 
 # Exclude IDE folders
 .vscode/
+.vs/
 
 # Exclude local runtime data
 data/
@@ -19,6 +20,15 @@ data/
 # Exclude Token Data
 git_token.txt
 
-# Exlude scratchpad
+# Exclude scratchpad
 *.scratchpad/
+
+# ==========================================
+# C# / ZeroGBridge Build & Runtime Exclusions
+# ==========================================
+ZeroGBridge/bin/
+ZeroGBridge/obj/
+*.user
+*.suo
+*.csproj.user
 EOF
