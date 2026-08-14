@@ -47,6 +47,8 @@ namespace ZeroGBridge
             _telemetryThread.Start();
         }
 
+        private int _logCounter = 0;
+
         private void TelemetryLoop()
         {
             while (_isRunning)
@@ -71,6 +73,15 @@ namespace ZeroGBridge
 
                     // Broadcast via TCP server to connected desktop clients (ZAH)
                     _telemetryServer?.Broadcast(telemetryData);
+
+                    // --- PERIODIC SERVER LOG EMISSION (EAH Style) ---
+                    // Increment counter and log to server console every 15 seconds (every 7 cycles at 2s sleep)
+                    _logCounter++;
+                    if (_logCounter >= 7)
+                    {
+                        _logCounter = 0;
+                        Console.WriteLine("[ZGB] INFO: Zero-G Bridge Heartbeat Active - Monitoring telemetry streams on port 30100.");
+                    }
                 }
                 catch (Exception ex)
                 {
